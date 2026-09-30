@@ -68,6 +68,18 @@
  *           - sicurezza: nomi con apostrofo (es. Dell'Acqua) non rompono più i pulsanti; escape di
  *             numero fattura, metodi di pagamento personalizzati, intestazioni CSV
  *           - avviso alla chiusura della pagina se ci sono modifiche non ancora salvate
+ * v2.23.0 — nuovo: ritenuta d'acconto e split payment
+ *           - ogni documento può avere `ritenuta` (€) e `ivaSplit` (€, IVA versata direttamente dal
+ *             cliente PA). Il "netto da pagare" = totale − ritenuta − IVA split è la base di residuo,
+ *             stato, scadenze, riconciliazione e rollover: queste fatture ora si chiudono a zero
+ *           - import XML: letti DatiRitenuta/ImportoRitenuta (anche multipli) ed EsigibilitaIVA = S
+ *           - form fattura: campo ritenuta (con scorciatoie 20%/4% dell'imponibile), casella split
+ *             payment, totale "Netto da pagare"
+ *           - report IVA: l'IVA delle vendite in split payment non è più conteggiata a debito;
+ *             nuovo riepilogo ritenute (subite sulle attive, da versare con F24 sulle passive, con
+ *             scadenza al 16 del mese successivo al pagamento), esportabile in CSV
+ *           - badge RIT / SPLIT in tabella, export CSV fatture con colonne ritenuta/IVA split/netto
+ *           - campi opzionali: i dati esistenti restano validi (senza ritenuta né split)
  */
 
 // ======================== STATO GLOBALE ========================
@@ -657,14 +669,7 @@ function getCandidatesForMovement(m) {
   var docType = isOutflow ? 'p' : 'a';
   var candidates = [];
   S[docType].forEach(function(doc) {
-    var residuoDoc;
-    if (doc.tipo === 'nota_credito') {
-      var creditoTotale = Math.abs(doc.tot);
-      var usato = doc.pagato || 0;
-      residuoDoc = Math.max(0, creditoTotale - usato);
-    } else {
-      residuoDoc = Math.max(0, doc.tot - (doc.pagato || 0));
-    }
+    var residuoDoc = residuo(doc); // v2.23: al netto di ritenuta e IVA split
     if (residuoDoc <= 0.005) return;
     candidates.push({
       doc: doc,
@@ -881,7 +886,7 @@ function renderRecModal(m) {
       var doc = c.doc;
       var docRsNorm = normalizeText(doc.rs);
       var docNum = String(doc.num || '').toLowerCase();
-      var docTot = Math.abs(doc.tot);
+      var docTot = nettoDaPagare(doc); // v2.23: in banca arriva il netto, non il totale documento
       var docResiduo = c.residuo;
 
       // --- segnale ragione sociale ---
@@ -2220,7 +2225,7 @@ function archiveRow(i, type) {
   return '<tr>' +
     '<td style="text-align:center"><input type="checkbox" class="archive-doc-checkbox" data-id="' + i.id + '" data-type="' + type + '" ' + checked + ' onchange="toggleArchiveDocSelection(\'' + i.id + '\',\'' + type + '\')"></td>' +
     '<td style="text-align:center"><span class="dot dot-' + st + '" title="' + (st === 'r' ? 'Da pagare' : st === 'y' ? 'Parziale' : 'Pagata') + '"></span></td>' +
-    '<td>' + tipoBadge(i.tipo) + '</td>' +
+    '<td>' + tipoBadge(i.tipo) + badgeRitSplit(i) + '</td>' +
     '<td><strong>' + esc(i.rs) + '</strong></td>' +
     '<td>' + esc(i.num) + '</td>' +
     '<td>' + (i.data ? i.data.split('-').reverse().join('/') : '—') + '</td>' +
@@ -2683,11 +2688,14 @@ function parseXML(str, type, fname) {
   var imponibile = 0, totiva = 0;
   var righeIva = [];
   var aliqSet = new Set();
+  var ivaSplit = 0;
   riep.forEach(function(r) {
     var imp = round2(parseFloat(qt2(r, 'ImponibileImporto')) || 0);
     var iva = round2(parseFloat(qt2(r, 'Imposta')) || 0);
     var aliqV = parseFloat(qt2(r, 'AliquotaIVA')) || 0;
-    righeIva.push({ aliq: aliqV, imp: imp, iva: iva });
+    var esig = (qt2(r, 'EsigibilitaIVA') || '').toUpperCase();
+    if (esig === 'S') ivaSplit = round2(ivaSplit + iva); // v2.23: split payment
+    righeIva.push(esig ? { aliq: aliqV, imp: imp, iva: iva, esig: esig } : { aliq: aliqV, imp: imp, iva: iva });
     imponibile += imp; totiva += iva;
     if (aliqV > 0) aliqSet.add(aliqV + '%');
   });
@@ -2702,6 +2710,9 @@ function parseXML(str, type, fname) {
   var sign = isCredito ? -1 : 1;
   var aliqDisplay = aliqSet.size ? Array.from(aliqSet).join(', ') : '0%';
   var totDoc = round2((parseFloat(qt2(doc, 'ImportoTotaleDocumento')) || (imponibile + totiva)) * sign);
+  // v2.23: ritenute (DatiRitenuta può ripetersi: ritenuta d'acconto, contributi INPS, ENASARCO...)
+  var ritenuta = 0;
+  qsa2(datiGen || doc, 'DatiRitenuta').forEach(function(r) { ritenuta = round2(ritenuta + Math.abs(parseFloat(qt2(r, 'ImportoRitenuta')) || 0)); });
   var modXML = qt2(doc, 'ModalitaPagamento') || '';
   var modMap = { MP01: 'contanti', MP02: 'assegno', MP04: 'carta', MP05: 'bonifico', MP09: 'riba', MP12: 'rid', MP08: 'rid' };
   return {
@@ -2714,7 +2725,9 @@ function parseXML(str, type, fname) {
     aliq: aliqDisplay,
     totiva: round2(totiva * sign),
     tot: totDoc,
-    righeIva: righeIva.length ? righeIva.map(function(r) { return { aliq: r.aliq, imp: r.imp * sign, iva: r.iva * sign }; }) : [{ aliq: 0, imp: round2(imponibile * sign), iva: round2(totiva * sign) }],
+    righeIva: righeIva.length ? righeIva.map(function(r) { var o = { aliq: r.aliq, imp: r.imp * sign, iva: r.iva * sign }; if (r.esig) o.esig = r.esig; return o; }) : [{ aliq: 0, imp: round2(imponibile * sign), iva: round2(totiva * sign) }],
+    ritenuta: ritenuta,
+    ivaSplit: ivaSplit,
     modpag: modMap[modXML] || '',
     scad: scadXML, note: '',
     hasPdf: false, pdfName: null,
@@ -2890,17 +2903,29 @@ function renderTotals(type, data) {
   }).join('');
   tf.innerHTML = '<tr>' + cells + '</tr>';
 }
+// ======================== RITENUTA D'ACCONTO E SPLIT PAYMENT (v2.23) ========================
+// Importi sempre positivi, indipendenti dal segno della nota di credito.
+// - ritenuta: trattenuta dal cliente e versata da lui all'Erario (F24) → non arriva mai in banca
+// - ivaSplit: IVA che il cliente PA versa direttamente all'Erario (EsigibilitaIVA = S) → idem
+function ritenutaDoc(i) { return Math.abs(parseFloat(i && i.ritenuta) || 0); }
+function ivaSplitDoc(i) { return Math.abs(parseFloat(i && i.ivaSplit) || 0); }
+// Importo che si incassa/paga davvero: è la base di residuo, stato e riconciliazione.
+function nettoDaPagare(i) {
+  var base = i.tipo === 'nota_credito' ? Math.abs(i.tot || 0) : Math.max(0, i.tot || 0);
+  return Math.max(0, round2(base - ritenutaDoc(i) - ivaSplitDoc(i)));
+}
+function badgeRitSplit(i) {
+  var out = '';
+  if (ritenutaDoc(i) > 0) out += ' <span class="badge badge-rit" title="Ritenuta d\'acconto € ' + fmt(ritenutaDoc(i)) + '">RIT</span>';
+  if (ivaSplitDoc(i) > 0) out += ' <span class="badge badge-split" title="Split payment: IVA € ' + fmt(ivaSplitDoc(i)) + ' versata dal cliente">SPLIT</span>';
+  return out;
+}
 // v2.22: confronto sul valore assoluto — per le note di credito (tot negativo) "p >= t" era sempre
 // vero, quindi una nota usata solo in parte risultava verde.
-function statusOf(i) { var p = i.pagato || 0, t = Math.abs(i.tot || 0); if (p <= 0) return 'r'; if (p >= t - 0.005) return 'g'; return 'y'; }
+// v2.23: il riferimento è il netto da pagare (totale − ritenuta − IVA split).
+function statusOf(i) { var p = i.pagato || 0, t = nettoDaPagare(i); if (p <= 0) return t > 0 ? 'r' : 'g'; if (p >= t - 0.005) return 'g'; return 'y'; }
 function residuo(i) {
-  var res;
-  if (i.tipo === 'nota_credito') {
-    res = Math.abs(i.tot) - (i.pagato || 0);
-  } else {
-    res = (i.tot || 0) - (i.pagato || 0);
-  }
-  return Math.max(0, round2(res));
+  return Math.max(0, round2(nettoDaPagare(i) - (i.pagato || 0)));
 }
 function tipoBadge(tipo) {
   var map = { fattura: '<span class="badge badge-f">FATTURA</span>', proforma: '<span class="badge badge-p">PROFORMA</span>', nota_credito: '<span class="badge badge-nc">N.CREDITO</span>', acconto: '<span class="badge badge-a">ACCONTO</span>' };
@@ -3026,7 +3051,7 @@ function row(i, type) {
   var pdfIcon = i.hasPdf ? '<button class="ico" style="color:#2563eb;font-size:1rem" onclick="openPDF(\'' + i.id + '\',\'' + type + '\')">📄</button>' : '—';
   return '<tr class="' + (type === 'a' ? 'act' : 'pas') + '">' +
     '<td><span class="dot ' + dotClass + '" title="' + (st === 'r' ? 'Da pagare' : st === 'y' ? 'Parziale' : 'Pagata') + '"></span></td>' +
-    '<td>' + tipoBadge(i.tipo) + '</td>' +
+    '<td>' + tipoBadge(i.tipo) + badgeRitSplit(i) + '</td>' +
     '<td><strong>' + esc(i.rs) + '</strong></td>' +
     '<td>' + esc(i.num) + '</td>' +
     '<td>' + (i.data ? i.data.split('-').reverse().join('/') : '—') + '</td>' +
@@ -3060,6 +3085,8 @@ function openAdd(type) {
   document.getElementById('f-data').value = today();
   document.getElementById('f-scad').value = '';
   document.getElementById('f-note').value = '';
+  if (document.getElementById('f-ritenuta')) document.getElementById('f-ritenuta').value = '0';
+  if (document.getElementById('f-split')) document.getElementById('f-split').checked = false;
   document.getElementById('f-modpag').innerHTML = modOptions();
   document.getElementById('f-valuta').value = 'EUR';
   document.getElementById('f-pdf').value = '';
@@ -3173,6 +3200,8 @@ function editInv(id, type) {
   document.getElementById('f-data').value = inv.data || '';
   document.getElementById('f-scad').value = inv.scad || '';
   document.getElementById('f-note').value = inv.note || '';
+  if (document.getElementById('f-ritenuta')) document.getElementById('f-ritenuta').value = ritenutaDoc(inv).toFixed(2);
+  if (document.getElementById('f-split')) document.getElementById('f-split').checked = ivaSplitDoc(inv) > 0;
   document.getElementById('f-modpag').innerHTML = modOptions(inv.modpag);
   document.getElementById('f-valuta').value = inv.valuta || 'EUR';
   var ivaContainer = document.getElementById('iva-lines');
@@ -3222,10 +3251,26 @@ async function saveInv() {
   if (!righeIva.length) { toast('Aggiungi almeno una riga IVA', 'error'); return; }
   var tot = round2(imponibile + totiva);
   var oldInvEdit = editId ? S[curType].find(function(i) { return i.id === editId; }) : null;
-  // v2.22: il nuovo totale non può scendere sotto quanto già pagato/compensato
-  if (oldInvEdit && (oldInvEdit.pagato || 0) > Math.abs(tot) + 0.005) {
-    toast('⚠️ Il nuovo totale (€ ' + fmt(Math.abs(tot)) + ') è inferiore al già pagato (€ ' + fmt(oldInvEdit.pagato) + '): elimina prima i pagamenti in eccesso', 'warn');
+  // v2.23: ritenuta e split payment
+  var ritenuta = round2(Math.abs(parseFloat((document.getElementById('f-ritenuta') || { value: 0 }).value) || 0));
+  var splitChk = !!(document.getElementById('f-split') && document.getElementById('f-split').checked);
+  var ivaSplit = 0;
+  if (splitChk) {
+    // Se l'IVA non è cambiata si conserva l'IVA split letta dall'XML (può riguardare solo alcune righe)
+    ivaSplit = (oldInvEdit && ivaSplitDoc(oldInvEdit) > 0 && Math.abs(round2(Math.abs(oldInvEdit.totiva || 0) - Math.abs(totiva))) < 0.005)
+      ? ivaSplitDoc(oldInvEdit) : round2(Math.abs(totiva));
+  }
+  if (ritenuta + ivaSplit > Math.abs(tot) + 0.005) { toast('⚠️ Ritenuta + IVA split superano il totale del documento', 'warn'); return; }
+  var nettoNuovo = round2(Math.abs(tot) - ritenuta - ivaSplit);
+  // v2.22: il netto da pagare non può scendere sotto quanto già pagato/compensato
+  if (oldInvEdit && (oldInvEdit.pagato || 0) > nettoNuovo + 0.005) {
+    toast('⚠️ Il netto da pagare (€ ' + fmt(nettoNuovo) + ') è inferiore al già pagato (€ ' + fmt(oldInvEdit.pagato) + '): elimina prima i pagamenti in eccesso', 'warn');
     return;
+  }
+  if (splitChk) righeIva.forEach(function(r) { if (r.iva) r.esig = 'S'; });
+  else if (oldInvEdit && oldInvEdit.righeIva) {
+    // conserva l'esigibilità letta dall'XML (I/D), tranne S che dipende dalla casella
+    righeIva.forEach(function(r, idx) { var o = oldInvEdit.righeIva[idx]; if (o && o.esig && o.esig !== 'S') r.esig = o.esig; });
   }
   var invData = {
     id: editId || uid(),
@@ -3234,6 +3279,8 @@ async function saveInv() {
     totiva: round2(totiva),
     tot: tot,
     righeIva: righeIva,
+    ritenuta: ritenuta,
+    ivaSplit: ivaSplit,
     aliq: righeIva.map(function(r) { return r.aliq; }).join(', ') + '%',
     pagamenti: editId ? (S[curType].find(function(i) { return i.id === editId; }) || {}).pagamenti || [] : [],
     pagato: editId ? (S[curType].find(function(i) { return i.id === editId; }) || {}).pagato || 0 : 0,
@@ -3327,7 +3374,11 @@ function openPayments(id, type) {
   if (!inv) return;
   var payDiv = document.getElementById('pay-body');
   var payInfo = document.getElementById('pay-info');
-  payInfo.textContent = (type === 'a' ? 'Attiva' : 'Passiva') + ' - ' + inv.rs + ' - Totale € ' + fmt(inv.tot) + ' - Residuo € ' + fmt(residuo(inv));
+  var extraInfo = '';
+  if (ritenutaDoc(inv) > 0) extraInfo += ' - Ritenuta € ' + fmt(ritenutaDoc(inv));
+  if (ivaSplitDoc(inv) > 0) extraInfo += ' - IVA split € ' + fmt(ivaSplitDoc(inv));
+  if (extraInfo) extraInfo += ' - Netto € ' + fmt(nettoDaPagare(inv));
+  payInfo.textContent = (type === 'a' ? 'Attiva' : 'Passiva') + ' - ' + inv.rs + ' - Totale € ' + fmt(inv.tot) + extraInfo + ' - Residuo € ' + fmt(residuo(inv));
   var pagsHtml = '<div class="rec-section-lbl">Pagamenti registrati</div>';
   if (!inv.pagamenti || !inv.pagamenti.length) {
     pagsHtml += '<div style="color:#a8a29e;font-size:.84rem;padding:.5rem 0">Nessun pagamento</div>';
@@ -3507,9 +3558,9 @@ function clearAll() {
 function exportCSV(type) {
   var data = S[type];
   if (!data.length) { toast('Nessuna fattura da esportare', 'warn'); return; }
-  var headers = ['Ragione Sociale', 'Numero', 'Data', 'Scadenza', 'Imponibile', 'IVA %', 'Tot. IVA', 'Totale', 'Pagato', 'Residuo', 'Note'];
+  var headers = ['Ragione Sociale', 'Numero', 'Data', 'Scadenza', 'Imponibile', 'IVA %', 'Tot. IVA', 'Totale', 'Ritenuta', 'IVA split payment', 'Netto da pagare', 'Pagato', 'Residuo', 'Note'];
   var rows = data.map(function(i) {
-    return [i.rs, i.num, i.data, i.scad || '', i.imp, i.aliq, i.totiva, i.tot, i.pagato || 0, residuo(i), i.note || ''];
+    return [i.rs, i.num, i.data, i.scad || '', i.imp, i.aliq, i.totiva, i.tot, ritenutaDoc(i), ivaSplitDoc(i), nettoDaPagare(i), i.pagato || 0, residuo(i), i.note || ''];
   });
   var csv = [headers].concat(rows).map(function(row) {
     return row.map(function(cell) { return '"' + String(cell).replace(/"/g, '""') + '"'; }).join(',');
@@ -3567,8 +3618,11 @@ function buildReportIVA(dal, al) {
     if (al && doc.data > al) return false;
     return true;
   }
-  S.a.forEach(function(doc) { if (inPeriodo(doc)) addRighe(vendite, doc); });
-  S.p.forEach(function(doc) { if (inPeriodo(doc)) addRighe(acquisti, doc); });
+  // v2.23: IVA in split payment — sulle vendite la versa il cliente PA, quindi NON è a debito.
+  var splitVendite = 0, splitAcquisti = 0;
+  function segnoDoc(doc) { return (doc.tot || 0) < 0 ? -1 : 1; }
+  S.a.forEach(function(doc) { if (inPeriodo(doc)) { addRighe(vendite, doc); splitVendite = round2(splitVendite + segnoDoc(doc) * ivaSplitDoc(doc)); } });
+  S.p.forEach(function(doc) { if (inPeriodo(doc)) { addRighe(acquisti, doc); splitAcquisti = round2(splitAcquisti + segnoDoc(doc) * ivaSplitDoc(doc)); } });
   var aliqSet = new Set(Array.from(vendite.keys()).concat(Array.from(acquisti.keys())));
   var aliqSorted = Array.from(aliqSet).sort(function(a, b) { return a - b; });
   var righe = aliqSorted.map(function(aliq) {
@@ -3580,13 +3634,44 @@ function buildReportIVA(dal, al) {
   var totIvaVendite = round2(righe.reduce(function(s, r) { return s + r.ivaVendite; }, 0));
   var totImpAcquisti = round2(righe.reduce(function(s, r) { return s + r.impAcquisti; }, 0));
   var totIvaAcquisti = round2(righe.reduce(function(s, r) { return s + r.ivaAcquisti; }, 0));
-  return { righe: righe, totImpVendite: totImpVendite, totIvaVendite: totIvaVendite, totImpAcquisti: totImpAcquisti, totIvaAcquisti: totIvaAcquisti, saldo: round2(totIvaVendite - totIvaAcquisti) };
+  return { righe: righe, totImpVendite: totImpVendite, totIvaVendite: totIvaVendite, totImpAcquisti: totImpAcquisti, totIvaAcquisti: totIvaAcquisti,
+    splitVendite: splitVendite, splitAcquisti: splitAcquisti,
+    saldo: round2(totIvaVendite - splitVendite - totIvaAcquisti) };
+}
+// v2.23: riepilogo ritenute d'acconto nel periodo.
+// - Attive: ritenute SUBITE (le versa il cliente; per te sono un credito d'imposta) — per data documento.
+// - Passive: ritenute OPERATE da te sui compensi pagati (professionisti ecc.), da versare con F24
+//   (tipicamente codice tributo 1040) entro il 16 del mese successivo al PAGAMENTO — per data
+//   dell'ultimo pagamento registrato. Le fatture non ancora pagate sono elencate a parte.
+function scadenzaF24(dataPag) {
+  if (!dataPag) return '';
+  var d = new Date(dataPag + 'T00:00:00');
+  if (isNaN(d.getTime())) return '';
+  return isoLocal(new Date(d.getFullYear(), d.getMonth() + 1, 16));
+}
+function buildRitenute(dal, al) {
+  function inRange(data) { return data && (!dal || data >= dal) && (!al || data <= al); }
+  var attive = S.a.filter(function(d) { return ritenutaDoc(d) > 0 && d.tipo !== 'proforma' && inRange(d.data); })
+    .map(function(d) { return { doc: d, ritenuta: ritenutaDoc(d) * ((d.tot || 0) < 0 ? -1 : 1) }; });
+  var passive = [], passiveNonPagate = [];
+  S.p.forEach(function(d) {
+    if (!(ritenutaDoc(d) > 0) || d.tipo === 'proforma') return;
+    var pags = (d.pagamenti || []).filter(function(p) { return p.data; }).sort(function(a, b) { return a.data.localeCompare(b.data); });
+    var ultimo = pags.length ? pags[pags.length - 1].data : '';
+    var segno = (d.tot || 0) < 0 ? -1 : 1;
+    if (!ultimo) { if (inRange(d.data)) passiveNonPagate.push({ doc: d, ritenuta: ritenutaDoc(d) * segno }); return; }
+    if (inRange(ultimo)) passive.push({ doc: d, ritenuta: ritenutaDoc(d) * segno, dataPag: ultimo, scadF24: scadenzaF24(ultimo), parziale: residuo(d) > 0 });
+  });
+  passive.sort(function(a, b) { return a.dataPag.localeCompare(b.dataPag); });
+  var sum = function(arr) { return round2(arr.reduce(function(s, r) { return s + r.ritenuta; }, 0)); };
+  return { attive: attive, passive: passive, passiveNonPagate: passiveNonPagate, totAttive: sum(attive), totPassive: sum(passive), totNonPagate: sum(passiveNonPagate) };
 }
 function renderReportIVA() {
   var dal = document.getElementById('riva-dal').value;
   var al = document.getElementById('riva-al').value;
   var rep = buildReportIVA(dal, al);
   _lastReportIVA = rep;
+  renderRitenute(dal, al);
   var body = document.getElementById('riva-body');
   if (!body) return;
   if (!rep.righe.length) {
@@ -3607,10 +3692,59 @@ function renderReportIVA() {
     '<tfoot><tr style="background:#f5f4f0;font-weight:700"><td ' + td + '>Totale</td><td ' + tdn + '>€ ' + fmt(rep.totImpVendite) + '</td><td ' + tdn + '>€ ' + fmt(rep.totIvaVendite) + '</td><td ' + tdn + '>€ ' + fmt(rep.totImpAcquisti) + '</td><td ' + tdn + '>€ ' + fmt(rep.totIvaAcquisti) + '</td></tr></tfoot>' +
     '</table></div>' +
     '<div style="margin-top:1rem;padding:.75rem 1rem;background:' + (rep.saldo >= 0 ? '#fef2f2' : '#f0fdf4') + ';border-radius:8px;font-size:.95rem">' +
-    '<strong>IVA a debito (vendite):</strong> € ' + fmt(rep.totIvaVendite) + ' — <strong>IVA a credito (acquisti):</strong> € ' + fmt(rep.totIvaAcquisti) + '<br>' +
+    '<strong>IVA a debito (vendite):</strong> € ' + fmt(round2(rep.totIvaVendite - rep.splitVendite)) + ' — <strong>IVA a credito (acquisti):</strong> € ' + fmt(rep.totIvaAcquisti) + '<br>' +
+    (rep.splitVendite ? '<span style="font-size:.85rem">di cui escluse dal debito: € ' + fmt(rep.splitVendite) + ' di IVA vendite in <strong>split payment</strong> (versata dal cliente PA)</span><br>' : '') +
+    (rep.splitAcquisti ? '<span style="font-size:.85rem">ℹ️ IVA acquisti in split payment: € ' + fmt(rep.splitAcquisti) + ' (inclusa nel credito — verifica il trattamento con il commercialista)</span><br>' : '') +
     '<strong style="font-size:1.1rem">' + (rep.saldo >= 0 ? '💸 Saldo a debito (da versare): € ' + fmt(rep.saldo) : '💰 Saldo a credito: € ' + fmt(Math.abs(rep.saldo))) + '</strong>' +
     '<p style="font-size:.72rem;color:#78716c;margin-top:.4rem">⚠️ Report indicativo basato sulla data documento in archivio (competenza), non su esigibilità o registri IVA ufficiali — verifica sempre con il tuo commercialista prima della liquidazione effettiva.</p>' +
     '</div>';
+}
+var _lastRitenute = null;
+function renderRitenute(dal, al) {
+  var box = document.getElementById('riva-ritenute');
+  if (!box) return;
+  var r = buildRitenute(dal, al);
+  _lastRitenute = r;
+  if (!r.attive.length && !r.passive.length && !r.passiveNonPagate.length) {
+    box.innerHTML = '<p style="color:#a8a29e;font-size:.85rem">Nessuna ritenuta d\'acconto nel periodo.</p>';
+    return;
+  }
+  var td = 'style="padding:.4rem;border:1px solid #e5e3dc"', tdn = 'style="padding:.4rem;border:1px solid #e5e3dc;text-align:right"';
+  function dt(d) { return d ? d.split('-').reverse().join('/') : '—'; }
+  var html = '<div class="rec-section-lbl" style="margin-top:0">🧾 Ritenute d\'acconto nel periodo</div>';
+  html += '<div style="display:flex;gap:1rem;flex-wrap:wrap;font-size:.9rem;margin-bottom:.6rem">' +
+    '<div><strong>Subite (attive, a credito):</strong> € ' + fmt(r.totAttive) + ' <span style="color:#78716c">(' + r.attive.length + ' doc.)</span></div>' +
+    '<div><strong>Da versare con F24 (passive pagate):</strong> € ' + fmt(r.totPassive) + ' <span style="color:#78716c">(' + r.passive.length + ' doc.)</span></div>' +
+    (r.passiveNonPagate.length ? '<div><strong>Su passive non ancora pagate:</strong> € ' + fmt(r.totNonPagate) + '</div>' : '') + '</div>';
+  if (r.passive.length) {
+    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem;margin-bottom:.6rem"><thead><tr style="background:#f5f4f0"><th ' + td + '>Fornitore</th><th ' + td + '>N.</th><th ' + td + '>Pagata il</th><th ' + tdn + '>Ritenuta</th><th ' + td + '>Scadenza F24</th></tr></thead><tbody>' +
+      r.passive.map(function(x) {
+        return '<tr><td ' + td + '>' + esc(x.doc.rs) + '</td><td ' + td + '>' + esc(x.doc.num) + '</td><td ' + td + '>' + dt(x.dataPag) + (x.parziale ? ' <span style="color:#b45309">(parziale)</span>' : '') + '</td><td ' + tdn + '>€ ' + fmt(x.ritenuta) + '</td><td ' + td + '>' + dt(x.scadF24) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  if (r.attive.length) {
+    html += '<details style="font-size:.8rem;margin-bottom:.4rem"><summary style="cursor:pointer">Dettaglio ritenute subite sulle fatture attive</summary><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:.4rem"><thead><tr style="background:#f5f4f0"><th ' + td + '>Cliente</th><th ' + td + '>N.</th><th ' + td + '>Data</th><th ' + tdn + '>Ritenuta</th></tr></thead><tbody>' +
+      r.attive.map(function(x) { return '<tr><td ' + td + '>' + esc(x.doc.rs) + '</td><td ' + td + '>' + esc(x.doc.num) + '</td><td ' + td + '>' + dt(x.doc.data) + '</td><td ' + tdn + '>€ ' + fmt(x.ritenuta) + '</td></tr>'; }).join('') +
+      '</tbody></table></div></details>';
+  }
+  html += '<p style="font-size:.72rem;color:#78716c">⚠️ Indicativo: la scadenza F24 è il 16 del mese successivo all\'ultimo pagamento registrato. Se una fattura è pagata in più rate, la ritenuta va versata in proporzione a ogni rata — verifica con il commercialista.</p>';
+  box.innerHTML = html;
+}
+function exportRitenuteCSV() {
+  if (!_lastRitenute || (!_lastRitenute.attive.length && !_lastRitenute.passive.length && !_lastRitenute.passiveNonPagate.length)) { toast('Nessuna ritenuta nel periodo', 'warn'); return; }
+  var rows = [['Tipo', 'Ragione Sociale', 'Numero', 'Data documento', 'Data pagamento', 'Ritenuta', 'Scadenza F24']];
+  _lastRitenute.passive.forEach(function(x) { rows.push(['Passiva - da versare', x.doc.rs, x.doc.num, x.doc.data, x.dataPag, x.ritenuta, x.scadF24]); });
+  _lastRitenute.passiveNonPagate.forEach(function(x) { rows.push(['Passiva - non pagata', x.doc.rs, x.doc.num, x.doc.data, '', x.ritenuta, '']); });
+  _lastRitenute.attive.forEach(function(x) { rows.push(['Attiva - subita', x.doc.rs, x.doc.num, x.doc.data, '', x.ritenuta, '']); });
+  var csv = rows.map(function(row) { return row.map(function(cell) { return '"' + String(cell).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  var link = document.createElement('a');
+  var url = URL.createObjectURL(blob);
+  link.href = url;
+  link.setAttribute('download', 'ritenute_' + (document.getElementById('riva-dal').value || '') + '_' + (document.getElementById('riva-al').value || '') + '.csv');
+  link.click();
+  URL.revokeObjectURL(url);
+  toast('📊 CSV ritenute esportato', 'success');
 }
 function exportReportIVACSV() {
   if (!_lastReportIVA || !_lastReportIVA.righe.length) { toast('Genera prima il report', 'warn'); return; }
@@ -3619,6 +3753,8 @@ function exportReportIVACSV() {
   var headers = ['Aliquota %', 'Imponibile Vendite', 'IVA Vendite (debito)', 'Imponibile Acquisti', 'IVA Acquisti (credito)'];
   var rows = _lastReportIVA.righe.map(function(r) { return [r.aliq, r.impVendite, r.ivaVendite, r.impAcquisti, r.ivaAcquisti]; });
   rows.push(['TOTALE', _lastReportIVA.totImpVendite, _lastReportIVA.totIvaVendite, _lastReportIVA.totImpAcquisti, _lastReportIVA.totIvaAcquisti]);
+  if (_lastReportIVA.splitVendite || _lastReportIVA.splitAcquisti) rows.push(['di cui split payment', '', _lastReportIVA.splitVendite, '', _lastReportIVA.splitAcquisti]);
+  rows.push(['SALDO (debito + / credito -)', '', _lastReportIVA.saldo, '', '']);
   var csv = [headers].concat(rows).map(function(row) {
     return row.map(function(cell) { return '"' + String(cell).replace(/"/g, '""') + '"'; }).join(',');
   }).join('\n');
@@ -4017,6 +4153,22 @@ function updateIvaTotals() {
   document.getElementById('ft-imp').textContent = '€ ' + fmt(totImp);
   document.getElementById('ft-iva').textContent = '€ ' + fmt(totIva);
   document.getElementById('ft-tot').textContent = '€ ' + fmt(totImp + totIva);
+  // v2.23: netto effettivamente da incassare/pagare
+  var nettoEl = document.getElementById('ft-netto');
+  if (nettoEl) {
+    var rit = Math.abs(parseFloat((document.getElementById('f-ritenuta') || { value: 0 }).value) || 0);
+    var split = document.getElementById('f-split') && document.getElementById('f-split').checked ? Math.abs(totIva) : 0;
+    nettoEl.textContent = '€ ' + fmt(Math.abs(totImp + totIva) - rit - split);
+    var wrap = document.getElementById('ft-netto-wrap');
+    if (wrap) wrap.style.display = (rit > 0 || split > 0) ? '' : 'none';
+  }
+}
+// v2.23: scorciatoia — ritenuta come percentuale dell'imponibile (20% professionisti, 4% condomini...)
+function setRitenutaPerc(perc) {
+  var totImp = 0;
+  document.querySelectorAll('#iva-lines .iva-line').forEach(function(line) { totImp += Math.abs(parseFloat(line.querySelector('.iva-imp').value) || 0); });
+  document.getElementById('f-ritenuta').value = round2(totImp * perc / 100).toFixed(2);
+  updateIvaTotals();
 }
 function toggleRemovePdf(btn) {
   var isRemove = btn.getAttribute('data-remove') === '1';
@@ -4039,7 +4191,7 @@ function acHide() { setTimeout(function() { document.getElementById('ac-list').c
 
 
 // ======================== STORAGE ========================
-var APP_VERSION = '2.22.0';
+var APP_VERSION = '2.23.0';
 var DATA_FILE = 'data.json';
 var ALLEGATI = 'allegati';
 var HAS_DIR = 'showDirectoryPicker' in window;

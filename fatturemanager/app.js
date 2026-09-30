@@ -3872,6 +3872,14 @@ function toggleChart() {
   }
 }
 function renderChart() {
+  // v2.22: Chart.js arriva da internet (CDN). Senza connessione (es. chiavetta su un PC offline)
+  // "Chart" non esiste: prima l'errore interrompeva l'avvio dell'app a metà (niente controllo
+  // integrità né backup). Ora il grafico viene semplicemente saltato.
+  if (typeof Chart === 'undefined') {
+    var sec = document.getElementById('chart-section');
+    if (sec && sec.style.display !== 'none') toast('📊 Grafici non disponibili: libreria non caricata (serve una connessione internet)', 'warn');
+    return;
+  }
   var clientiMap = new Map();
   S.a.forEach(function(inv) { var imp = inv.imp || 0; clientiMap.set(inv.rs, (clientiMap.get(inv.rs) || 0) + imp); });
   var topClienti = Array.from(clientiMap.entries()).map(function(entry) { return { nome: entry[0], imp: entry[1] }; }).sort(function(a, b) { return b.imp - a.imp; }).slice(0,5);
@@ -3920,6 +3928,7 @@ function buildCashflowMonthly(monthsBack) {
   });
 }
 function renderChartCashflow() {
+  if (typeof Chart === 'undefined') return; // v2.22: vedi renderChart
   var ctx = document.getElementById('chartCashflow') ? document.getElementById('chartCashflow').getContext('2d') : null;
   if (!ctx) return;
   var sel = document.getElementById('cashflow-range');

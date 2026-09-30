@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FattureManager Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ===== STILI BASE ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'DM Sans',sans-serif;background:#f7f6f2;color:#1c1917;min-height:100vh;font-size:14px;line-height:1.5}
+.app-header{background:#18181b;color:#fff;padding:.9rem 1.5rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200;box-shadow:0 2px 16px rgba(0,0,0,.35)}
+.app-logo{font-family:'Cormorant Garamond',serif;font-size:1.75rem;font-weight:700;letter-spacing:.04em}
+.app-logo em{color:#60a5fa;font-style:normal}
+.header-sub{font-size:.7rem;color:rgba(255,255,255,.45);letter-spacing:.06em;text-transform:uppercase}
+.summary-bar{background:#27272a;color:#fff;display:flex;gap:0;overflow:hidden}
+.sum-item{flex:1;padding:.55rem 1rem;border-right:1px solid rgba(255,255,255,.08);text-align:center}
+.sum-item:last-child{border-right:none}
+.sum-label{font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;opacity:.5;display:block}
+.sum-val{font-family:'Cormorant Garamond',serif;font-size:1.05rem;font-weight:700}
+.sum-val.green{color:#4ade80}
+.sum-val.red{color:#f87171}
+.sum-val.blue{color:#60a5fa}
+.container{max-width:1700px;margin:0 auto;padding:1.25rem 1rem;display:flex;flex-direction:column;gap:1.75rem}
+.section{border-radius:12px;box-shadow:0 4px 28px rgba(0,0,0,.09)}
+.section-hdr{padding:1.1rem 1.4rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;border-radius:12px 12px 0 0}
+.section-title{font-family:'Cormorant Garamond',serif;font-size:1.45rem;font-weight:700;color:#fff;display:flex;align-items:center;gap:.45rem}
+.section-title-sub{font-size:.7rem;opacity:.65;color:#fff;margin-top:.1rem;letter-spacing:.05em;text-transform:uppercase}
+.section-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+.sec-a .section-hdr{background:linear-gradient(135deg,#14532d,#166534)}
+.sec-a .section-body{background:#f0fdf4}
+.sec-a thead tr{background:#dcfce7}
+.sec-a thead th{color:#14532d}
+.sec-a tbody tr:hover{background:#dcfce7}
+.sec-a .btn-primary{background:#16a34a;color:#fff;border-color:#16a34a}
+.sec-a .btn-primary:hover{background:#15803d}
+.sec-a .btn-ghost{border-color:rgba(255,255,255,.4);color:#fff}
+.sec-a .btn-ghost:hover{background:rgba(255,255,255,.15)}
+.sec-p .section-hdr{background:linear-gradient(135deg,#7f1d1d,#991b1b)}
+.sec-p .section-body{background:#fff5f5}
+.sec-p thead tr{background:#fee2e2}
+.sec-p thead th{color:#7f1d1d}
+.sec-p tbody tr:hover{background:#fee2e2}
+.sec-p .btn-primary{background:#dc2626;color:#fff;border-color:#dc2626}
+.sec-p .btn-primary:hover{background:#b91c1c}
+.sec-p .btn-ghost{border-color:rgba(255,255,255,.4);color:#fff}
+.sec-p .btn-ghost:hover{background:rgba(255,255,255,.15)}
+.sec-bank .section-hdr{background:linear-gradient(135deg,#1e3a5f,#1e40af)}
+.sec-bank .section-body{background:#f0f4ff}
+.sec-bank thead tr{background:#dbeafe}
+.sec-bank thead th{color:#1e3a5f}
+.sec-bank tbody tr:hover{background:#dbeafe}
+.sec-bank tfoot tr{background:linear-gradient(90deg,#2563eb,#1d4ed8)}
+.sec-cassa .section-hdr{background:linear-gradient(135deg,#2d5a2d,#1f4f1f)}
+.sec-cassa .section-body{background:#f2faf2}
+.sec-archive .section-hdr{background:linear-gradient(135deg,#3730a3,#4338ca)}
+.sec-archive .section-body{background:#f0f0ff}
+.sec-scad .section-hdr{background:linear-gradient(135deg,#78350f,#92400e)}
+.sec-scad .section-body{background:#fffbeb}
+.sec-scad thead tr{background:#fef3c7}
+.sec-scad thead th{color:#78350f}
+.sec-scad tbody tr:hover{background:#fef3c7}
+.scad-stats{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem}
+.scad-stat-card{flex:1;min-width:150px;padding:.75rem 1rem;border-radius:10px;background:#fff;border:1px solid #e5e3dc}
+.scad-stat-card .ssc-lbl{font-size:.72rem;color:#78716c;font-weight:600;text-transform:uppercase;letter-spacing:.02em}
+.scad-stat-card .ssc-n{font-size:1.4rem;font-weight:800;margin-top:.15rem}
+.scad-stat-card .ssc-amt{font-size:.78rem;color:#57534e;margin-top:.1rem}
+.scad-stat-card.ssc-scadute{border-color:#fecaca;background:#fef2f2}
+.scad-stat-card.ssc-scadute .ssc-n{color:#dc2626}
+.scad-stat-card.ssc-entro7{border-color:#fed7aa;background:#fff7ed}
+.scad-stat-card.ssc-entro7 .ssc-n{color:#ea580c}
+.scad-stat-card.ssc-entro30{border-color:#fde68a;background:#fffbeb}
+.scad-stat-card.ssc-entro30 .ssc-n{color:#b45309}
+.section-body{padding:1rem;border-radius:0 0 12px 12px}
+.search-box{flex:1;min-width:180px;padding:.48rem .75rem;border:1.5px solid #e5e3dc;border-radius:8px;font-size:.855rem;background:#fff;outline:none}
+.drop-zone{border:2px dashed;border-radius:10px;padding:.85rem 1.25rem;text-align:center;cursor:pointer;margin-bottom:.85rem;position:relative;display:none}
+.drop-zone.show{display:block}
+.drop-zone input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop-zone .dz-icon{font-size:1.75rem}
+.drop-zone p{font-size:.78rem;color:#78716c}
+.btn{padding:.46rem .95rem;border-radius:8px;border:1.5px solid transparent;font-size:.83rem;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;white-space:nowrap}
+.btn-sm{padding:.3rem .65rem;font-size:.78rem}
+.btn-neutral{background:#f4f3ef;color:#44403c;border-color:#e5e3dc}
+.btn-neutral:hover{background:#e9e7e1}
+.btn-danger{background:#fef2f2;color:#dc2626;border-color:#fecaca}
+.btn-danger:hover{background:#fee2e2}
+.btn-blue{background:#2563eb;color:#fff;border-color:#2563eb}
+.btn-blue:hover{background:#1d4ed8}
+.btn-ghost{background:transparent;border-color:rgba(255,255,255,.4);color:#fff}
+.btn-ghost:hover{background:rgba(255,255,255,.15)}
+.ico{background:none;border:none;cursor:pointer;font-size:1rem;padding:.28rem;border-radius:6px}
+.ico:hover{background:rgba(0,0,0,.07)}
+.tbl-wrap{overflow-x:scroll;border-radius:8px;border:1px solid rgba(0,0,0,.07);background:#fff}
+table{width:100%;min-width:960px;border-collapse:collapse;font-size:.82rem}
+thead th{padding:.6rem .7rem;text-align:left;font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;white-space:nowrap}
+thead th:hover{filter:brightness(.95)}
+.sort-arrow{opacity:.35;margin-left:.2rem;font-size:.7rem}
+th.sorted .sort-arrow{opacity:1}
+tbody tr{border-bottom:1px solid #f5f4f0}
+td{padding:.55rem .7rem;vertical-align:middle}
+td.num{text-align:right;font-family:'Cormorant Garamond',serif;font-size:.95rem}
+.empty-state{text-align:center;padding:2.5rem 1rem;color:#a8a29e}
+.empty-state .ei{font-size:2.2rem;display:block}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dot-g{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,.55)}
+.dot-y{background:#f59e0b;box-shadow:0 0 6px rgba(245,158,11,.55)}
+.dot-r{background:#ef4444;box-shadow:0 0 6px rgba(239,68,68,.55)}
+.dot-b{background:#3b82f6;box-shadow:0 0 6px rgba(59,130,246,.55)}
+.badge{display:inline-block;padding:.12rem .4rem;border-radius:20px;font-size:.67rem;font-weight:700}
+.badge-f{background:#ede9fe;color:#5b21b6}
+.badge-p{background:#fef3c7;color:#92400e}
+.badge-nc{background:#fce7f3;color:#831843}
+.badge-a{background:#e0f2fe;color:#0c4a6e}
+.sec-a tfoot tr{background:linear-gradient(90deg,#16a34a,#15803d)}
+.sec-p tfoot tr{background:linear-gradient(90deg,#dc2626,#b91c1c)}
+.sec-bank tfoot tr{background:linear-gradient(90deg,#2563eb,#1d4ed8)}
+tfoot td{color:#fff;padding:.6rem .7rem;border-top:2px solid rgba(255,255,255,.2)}
+tfoot .tf-lbl{font-size:.63rem;opacity:.75;text-transform:uppercase;display:block}
+tfoot .tf-val{font-family:'Cormorant Garamond',serif;font-size:1.05rem;font-weight:700}
+.pay-cell{display:flex;flex-direction:column;gap:.2rem}
+.pay-entry{display:grid;grid-template-columns:70px 1fr auto;gap:.25rem .4rem;font-size:.78rem}
+.pe-date{color:#78716c;font-size:.73rem}
+.pe-mod{font-weight:500}
+.pe-amt{font-family:'Cormorant Garamond',serif;font-size:.92rem;font-weight:600;text-align:right}
+.res{display:inline-block;padding:.15rem .5rem;border-radius:20px;font-weight:700;font-size:.8rem}
+.res-0{background:#dcfce7;color:#14532d}
+.res-pos{background:#fee2e2;color:#7f1d1d}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:1rem;backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .2s}
+.overlay.open{opacity:1;pointer-events:auto}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:700px;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.28);transform:translateY(18px);transition:transform .2s}
+.overlay.open .modal{transform:translateY(0)}
+.modal-hdr{padding:1.15rem 1.4rem;border-bottom:1px solid #f0ede8;display:flex;justify-content:space-between;position:sticky;top:0;background:#fff}
+.modal-title{font-family:'Cormorant Garamond',serif;font-size:1.3rem;font-weight:700}
+.modal-sub{font-size:.75rem;color:#78716c}
+.modal-body{padding:1.2rem 1.4rem}
+.modal-ftr{padding:.9rem 1.4rem;border-top:1px solid #f0ede8;display:flex;justify-content:flex-end;gap:.5rem;position:sticky;bottom:0;background:#fff}
+.fg{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.75rem}
+.fg2{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+.flabel{font-size:.72rem;font-weight:600;color:#57534e;text-transform:uppercase}
+.finput,.fselect,.ftextarea{padding:.5rem .7rem;border:1.5px solid #e5e3dc;border-radius:8px;font-size:.875rem;background:#fff;width:100%}
+.finput:focus,.fselect:focus,.ftextarea:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+.ac-wrap{position:relative}
+.ac-list{position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #e5e3dc;border-top:none;border-radius:0 0 8px 8px;box-shadow:0 8px 20px rgba(0,0,0,.1);z-index:300;max-height:170px;overflow-y:auto;display:none}
+.ac-list.open{display:block}
+.ac-item{padding:.45rem .7rem;cursor:pointer}
+.ac-item:hover{background:#f5f4f0}
+.pay-row{display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:.5rem;align-items:center;padding:.55rem .7rem;background:#f9f8f5;border-radius:8px;margin-bottom:.4rem}
+.pay-form{display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:.5rem;align-items:end;padding:.75rem;background:#f0f9ff;border-radius:8px;border:1.5px dashed #bae6fd;margin-top:.75rem}
+.stat-blocks{display:flex;gap:.75rem;margin-bottom:1rem}
+.stat-blk{background:#f9f8f5;padding:.55rem .85rem;border-radius:8px;flex:1}
+.stat-blk .sl{font-size:.65rem;text-transform:uppercase;color:#78716c}
+.stat-blk .sv{font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:700}
+.toast-wrap{position:fixed;bottom:1.25rem;right:1.25rem;z-index:3000;display:flex;flex-direction:column;gap:.4rem;pointer-events:none}
+.toast{padding:.65rem .9rem;border-radius:10px;font-size:.83rem;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.18);max-width:360px;pointer-events:auto;animation:tIn .3s ease,tOut .3s ease 3.7s forwards}
+.toast-success{background:#14532d;color:#fff}
+.toast-warn{background:#92400e;color:#fff}
+.toast-error{background:#7f1d1d;color:#fff}
+.toast-info{background:#1e3a5f;color:#fff}
+@keyframes tIn{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes tOut{to{transform:translateX(110%);opacity:0}}
+.filter-bar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.85rem;padding:.6rem .75rem;border-radius:8px;background:#fff}
+.filter-group{display:flex;align-items:center;gap:.35rem;font-size:.78rem}
+.filter-date{padding:.38rem .55rem;border:1.5px solid #e5e3dc;border-radius:6px;font-size:.8rem;cursor:pointer}
+.filter-count{margin-left:auto;font-size:.75rem;color:#78716c}
+.iva-box{background:#f9f8f5;border:1.5px solid #e5e3dc;border-radius:10px;padding:.75rem}
+.iva-hdr{display:grid;grid-template-columns:160px 1fr 1fr 28px;gap:.5rem;margin-bottom:.4rem}
+.iva-hdr>div{font-size:.68rem;font-weight:700;color:#78716c;text-transform:uppercase}
+.iva-line{display:grid;grid-template-columns:160px 1fr 1fr 28px;gap:.5rem;align-items:center;margin-bottom:.4rem}
+.iva-totals{display:flex;justify-content:flex-end;gap:1.75rem;margin-top:.75rem;padding-top:.65rem;border-top:1.5px solid #e5e3dc}
+.iva-tot-item{text-align:right}
+.iva-tot-lbl{font-size:.67rem;text-transform:uppercase;color:#78716c}
+.iva-tot-val{font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:700}
+.pdf-embed{width:100%;height:580px;border:none;border-radius:8px;background:#f5f4f0}
+.mov-in td:nth-child(4){color:#16a34a;font-weight:700}
+.mov-out td:nth-child(5){color:#dc2626;font-weight:700}
+.rec-links{font-size:.75rem;display:flex;flex-direction:column;gap:.15rem}
+.rec-link{display:flex;justify-content:space-between;gap:.5rem}
+.rec-inv-row{display:grid;grid-template-columns:auto 1fr 100px 130px auto;gap:.4rem .6rem;align-items:center;padding:.55rem .6rem;border-radius:8px;border:1.5px solid #e5e3dc;margin-bottom:.4rem}
+.rec-inv-row.selected{border-color:#3b82f6;background:#eff6ff}
+.rec-existing{display:grid;grid-template-columns:1fr auto auto auto auto;gap:.4rem .6rem;align-items:center;padding:.4rem .6rem;border-radius:6px;background:#f9f8f5;margin-bottom:.3rem}
+.rec-section-lbl{font-size:.72rem;font-weight:700;text-transform:uppercase;color:#57534e;margin-bottom:.4rem}
+.rec-summary{background:#f0f6ff;border-radius:8px;padding:.55rem .8rem;margin-bottom:.75rem}
+.force-close-form{display:flex;flex-direction:column;gap:.5rem;padding:.7rem;background:#faf5ff;border:1.5px dashed #c4b5fd;border-radius:8px}
+.fsel{padding:.38rem .55rem;border:1.5px solid #e5e3dc;border-radius:6px;font-size:.78rem;cursor:pointer}
+.ico-pay{color:#16a34a}
+.folder-bar{background:#111;color:#fff;padding:.45rem 1.5rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;font-size:.8rem;border-bottom:1px solid #333}
+.folder-name{font-weight:500;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px}
+.save-status-wrap{display:flex;align-items:center;gap:.75rem;margin-left:auto}
+#save-status{font-size:.75rem;font-weight:600}
+.text-green{color:#16a34a}
+.text-red{color:#dc2626}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1rem}
+.chart-card{background:#fff;border-radius:12px;padding:1rem;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+.chart-card h4{font-family:'Cormorant Garamond',serif;font-size:1.1rem;margin-bottom:.5rem;color:#1c1917}
+.mod-custom-row{display:flex;justify-content:space-between;align-items:center;padding:.4rem .6rem;border-bottom:1px solid #f0ede8}
+
+/* ===== TAB ===== */
+.tabs-wrap {
+  display: flex;
+  gap: 0.25rem;
+  background: #fff;
+  border-radius: 12px 12px 0 0;
+  padding: 0.25rem 0.25rem 0;
+  box-shadow: 0 -2px 8px rgba(0,0,0,.04);
+  border-bottom: 2px solid #e5e3dc;
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  padding: 0.7rem 1.4rem;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #78716c;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: 0.15s;
+}
+.tab-btn:hover { color: #1c1917; }
+.tab-btn.active {
+  color: #1c1917;
+  border-bottom-color: #3b82f6;
+}
+.tab-btn.sec-a.active { border-bottom-color: #16a34a; }
+.tab-btn.sec-p.active { border-bottom-color: #dc2626; }
+.tab-btn.sec-bank.active { border-bottom-color: #2563eb; }
+.tab-btn.sec-cassa.active { border-bottom-color: #2d5a2d; }
+.tab-btn.sec-archive.active { border-bottom-color: #4338ca; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* sottotab archivio */
+.sub-tabs {
+  display: flex;
+  gap: 0.2rem;
+  padding: 0.25rem 0.5rem;
+  background: #f0f0ff;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 1px solid #dcd7f0;
+}
+.sub-tab-btn {
+  background: transparent;
+  border: none;
+  padding: 0.4rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #5b4f8a;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.sub-tab-btn:hover { color: #1c1917; }
+.sub-tab-btn.active { border-bottom-color: #4338ca; color: #1c1917; }
+.sub-tab-pane { display: none; }
+.sub-tab-pane.active { display: block; }
+
+/* fix allineamento totali tfoot */
+tfoot td {
+  vertical-align: middle;
+}
+tfoot td.num {
+  text-align: right;
+}
+/* ===== v2.22: regole mancanti (classi usate da app.js senza stile) ===== */
+.fg.span2,.fg2>.span2{grid-column:1/-1}
+.drop-zone.over{border-color:#3b82f6;background:#eff6ff}
+.tf-pay-line{display:flex;justify-content:space-between;gap:.5rem;font-size:.75rem}
+.rl-rs{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.rl-amt,.re-amt{white-space:nowrap}
+.re-rs{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* ===== v2.22: schermi stretti (tablet/telefono) ===== */
+@media (max-width:700px){
+  .fg2{grid-template-columns:1fr}
+  .summary-bar{flex-wrap:wrap}
+  .sum-item{flex:1 1 50%;border-bottom:1px solid rgba(255,255,255,.08)}
+  .app-header{flex-direction:column;align-items:flex-start;gap:.5rem}
+  .iva-hdr,.iva-line{grid-template-columns:70px 1fr 1fr 28px}
+  .rec-inv-row{grid-template-columns:auto 1fr;}
+  .rec-existing{grid-template-columns:1fr auto}
+  .modal{max-width:100% !important}
+}
+</style>
+</head>
+<body>
+<header class="app-header">
+  <div><div class="app-logo">Fatture<em>Manager</em> Pro</div><div class="header-sub" id="app-version">v2.22.0</div></div>
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+    <button class="btn btn-neutral btn-sm" onclick="exportData()">📤 Backup JSON</button>
+    <button class="btn btn-neutral btn-sm" onclick="importData()">📥 Ripristina</button>
+    <button class="btn btn-neutral btn-sm" onclick="clearAll()">🗑️ Reset</button>
+    <button class="btn btn-neutral btn-sm" onclick="openPrintSummary()">🖨️ Stampa Riepilogo</button>
+    <button class="btn btn-neutral btn-sm" onclick="openReportIVA()">🧾 Report IVA</button>
+    <button class="btn btn-neutral btn-sm" onclick="openPdfAudit()">🔍 Verifica PDF</button>
+    <button class="btn btn-neutral btn-sm" onclick="openAutoRulesModal()">⚙️ Chiusura Automatica</button>
+  </div>
+</header>
+<div id="network-path-warning" style="display:none;background:#7f1d1d;color:#fff;padding:.75rem 1.5rem;font-size:.85rem;line-height:1.5">
+  ⚠️ <strong>Attenzione: questa pagina è aperta da un percorso di rete</strong>, non da un disco locale. Chrome ed Edge trattano i percorsi di rete come origini instabili: i dati salvati (IndexedDB, permessi cartella) possono risultare incompleti, invisibili o "sparire" tra un utilizzo e l'altro, anche se il file su disco è integro. Per un funzionamento affidabile, apri questa app da un disco realmente locale — la chiavetta USB collegata direttamente al PC, non una cartella di rete o un'unità mappata (anche mappata con lettera, il problema resta lo stesso).
+</div>
+<div class="folder-bar">
+  <button class="btn btn-blue btn-sm" onclick="openFolder()">📂 Apri Dati</button>
+  <button class="btn btn-neutral btn-sm" onclick="newFolder()">➕ Nuovi Dati</button>
+  <button class="btn btn-neutral btn-sm" onclick="openRolloverModal()">📦 Rollover fine anno</button>
+  <button class="btn btn-neutral btn-sm" onclick="exportArchive()">📤 Esporta archivio</button>
+  <button class="btn btn-neutral btn-sm" onclick="importArchive()">📥 Importa archivio</button>
+  <span class="folder-name" id="folder-name">📂 Nessun file selezionato — clicca "Apri Dati"</span>
+  <div id="folder-status" class="save-status-wrap"><span id="save-status"></span><button class="btn btn-neutral btn-sm" onclick="manualSave()">💾 Salva ora</button></div>
+</div>
+<div class="summary-bar" id="summary-bar">
+  <div class="sum-item"><span class="sum-label">Fatture Attive</span><span class="sum-val green" id="sum-attive">€ 0,00</span></div>
+  <div class="sum-item"><span class="sum-label">Da Incassare</span><span class="sum-val green" id="sum-a-res">€ 0,00</span></div>
+  <div class="sum-item"><span class="sum-label">Fatture Passive</span><span class="sum-val red" id="sum-passive">€ 0,00</span></div>
+  <div class="sum-item"><span class="sum-label">Da Pagare</span><span class="sum-val red" id="sum-p-res">€ 0,00</span></div>
+  <div class="sum-item"><span class="sum-label">Saldo Netto</span><span class="sum-val blue" id="sum-saldo">€ 0,00</span></div>
+</div>
+<div style="display:flex; justify-content:flex-end; gap:0.5rem; margin:0 1rem 0 0;">
+  <button class="btn btn-neutral btn-sm" onclick="toggleChart()">📊 Mostra grafico top clienti/fornitori</button>
+</div>
+<div class="section" id="chart-section" style="margin-bottom:1.5rem; display:none;">
+  <div class="section-hdr" style="background:linear-gradient(135deg,#2d3e50,#1f2c38)">
+    <div class="section-title">📊 Top clienti e fornitori per imponibile</div>
+    <button class="btn btn-ghost btn-sm" onclick="toggleChart()">Nascondi grafico</button>
+  </div>
+  <div class="section-body" style="background:#fff">
+    <div class="chart-grid">
+      <div class="chart-card"><h4>🏆 Top 5 Clienti (imponibile attivo)</h4><canvas id="chartTopClienti" width="400" height="300" style="max-width:100%; height:auto"></canvas></div>
+      <div class="chart-card"><h4>🏆 Top 5 Fornitori (imponibile passivo)</h4><canvas id="chartTopFornitori" width="400" height="300" style="max-width:100%; height:auto"></canvas></div>
+      <div class="chart-card" style="grid-column:1/-1">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+          <h4 style="margin:0">💧 Andamento Cashflow (banca + cassa)</h4>
+          <select class="fsel" id="cashflow-range" onchange="renderChartCashflow()" style="width:auto">
+            <option value="6">Ultimi 6 mesi</option>
+            <option value="12" selected>Ultimi 12 mesi</option>
+            <option value="24">Ultimi 24 mesi</option>
+            <option value="0">Tutto lo storico</option>
+          </select>
+        </div>
+        <canvas id="chartCashflow" width="800" height="280" style="max-width:100%; height:auto; margin-top:.5rem"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="container" style="padding-top:0; gap:0.5rem;">
+  <!-- TAB principali -->
+  <div class="tabs-wrap">
+    <button class="tab-btn sec-a active" data-tab="tab-attive" onclick="switchTab('tab-attive')">📈 Attive</button>
+    <button class="tab-btn sec-p" data-tab="tab-passive" onclick="switchTab('tab-passive')">📉 Passive</button>
+    <button class="tab-btn sec-bank" data-tab="tab-movimenti" onclick="switchTab('tab-movimenti')">🏦 Movimenti</button>
+    <button class="tab-btn sec-cassa" data-tab="tab-cassa" onclick="switchTab('tab-cassa')">💰 Cassa</button>
+    <button class="tab-btn sec-scad" data-tab="tab-scadenze" onclick="switchTab('tab-scadenze')">⏰ Scadenze</button>
+    <button class="tab-btn sec-archive" data-tab="tab-archivio" onclick="switchTab('tab-archivio')">🗄️ Archivio</button>
+  </div>
+
+  <!-- TAB PANE ATTIVE -->
+  <div id="tab-attive" class="tab-pane active">
+    <div class="section sec-a">
+      <div class="section-hdr"><div><div class="section-title">📈 Fatture Attive</div><div class="section-title-sub">Fatture emesse verso clienti</div></div><div class="section-actions"><button class="btn btn-ghost btn-sm" onclick="triggerXML('a')">📂 Carica XML</button><input type="file" id="xml-a" multiple accept=".xml" style="display:none" onchange="handleXML(event,'a')"><button class="btn btn-ghost btn-sm" onclick="toggleZone('a')">⬇ Zona Drop</button><button class="btn btn-primary btn-sm" onclick="openAdd('a')">➕ Aggiungi</button></div></div>
+      <div class="section-body"><div class="drop-zone" id="zone-a" ondragover="onDragOver(event,'a')" ondragleave="onDragLeave(event,'a')" ondrop="onDrop(event,'a')"><input type="file" multiple accept=".xml" onchange="handleXML(event,'a')"><div class="dz-icon">📂</div><strong>Trascina file XML qui oppure clicca per selezionare</strong><p>Seleziona tutti i file .xml dalla cartella delle fatture attive</p></div>
+        <div class="filter-bar"><input type="text" class="search-box" id="srch-a" placeholder="🔍 Cerca ragione sociale, numero fattura..." oninput="render('a')" style="flex:1"><div class="filter-group"><span>📅 Dal</span><input type="date" class="filter-date" id="fda-a" onchange="render('a')"><span>→</span><input type="date" class="filter-date" id="fdb-a" onchange="render('a')"></div><select class="fsel" id="period-a" onchange="render('a')"><option value="all">Tutti i periodi</option></select><select class="fsel" id="fmod-a" onchange="render('a')"><option value="">Tutti i metodi</option></select><select class="fsel" id="fst-a" onchange="render('a')"><option value="">Tutti</option><option value="r">🔴 Da pagare</option><option value="y">🟡 Parziale</option><option value="g">🟢 Pagate</option></select><button class="btn btn-neutral btn-sm" onclick="clearFilter('a')">✕ Azzera</button><button class="btn btn-neutral btn-sm" onclick="exportCSV('a')">📊 CSV</button><span class="filter-count" id="fcount-a"></span></div>
+        <div class="tbl-wrap"><table><thead><tr id="th-a"></tr></thead><tbody id="tb-a"></tbody><tfoot id="tf-a"></tfoot></table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB PANE PASSIVE -->
+  <div id="tab-passive" class="tab-pane">
+    <div class="section sec-p">
+      <div class="section-hdr"><div><div class="section-title">📉 Fatture Passive</div><div class="section-title-sub">Fatture ricevute da fornitori</div></div><div class="section-actions"><button class="btn btn-ghost btn-sm" onclick="triggerXML('p')">📂 Carica XML</button><input type="file" id="xml-p" multiple accept=".xml" style="display:none" onchange="handleXML(event,'p')"><button class="btn btn-ghost btn-sm" onclick="toggleZone('p')">⬇ Zona Drop</button><button class="btn btn-ghost btn-sm" onclick="triggerPdfImport()">📎 Importa da PDF</button><input type="file" id="pdf-import-input" accept=".pdf" style="display:none" onchange="handlePdfImport(event)"><button class="btn btn-primary btn-sm" onclick="openAdd('p')">➕ Aggiungi</button></div></div>
+      <div class="section-body"><div class="drop-zone" id="zone-p" ondragover="onDragOver(event,'p')" ondragleave="onDragLeave(event,'p')" ondrop="onDrop(event,'p')"><input type="file" multiple accept=".xml" onchange="handleXML(event,'p')"><div class="dz-icon">📂</div><strong>Trascina file XML qui oppure clicca per selezionare</strong><p>Seleziona tutti i file .xml dalla cartella delle fatture passive</p></div>
+        <div class="filter-bar"><input type="text" class="search-box" id="srch-p" placeholder="🔍 Cerca ragione sociale, numero fattura..." oninput="render('p')" style="flex:1"><div class="filter-group"><span>📅 Dal</span><input type="date" class="filter-date" id="fda-p" onchange="render('p')"><span>→</span><input type="date" class="filter-date" id="fdb-p" onchange="render('p')"></div><select class="fsel" id="period-p" onchange="render('p')"><option value="all">Tutti i periodi</option></select><select class="fsel" id="fmod-p" onchange="render('p')"><option value="">Tutti i metodi</option></select><select class="fsel" id="fst-p" onchange="render('p')"><option value="">Tutti</option><option value="r">🔴 Da pagare</option><option value="y">🟡 Parziale</option><option value="g">🟢 Pagate</option></select><button class="btn btn-neutral btn-sm" onclick="clearFilter('p')">✕ Azzera</button><button class="btn btn-neutral btn-sm" onclick="exportCSV('p')">📊 CSV</button><span class="filter-count" id="fcount-p"></span></div>
+        <div class="tbl-wrap"><table><thead><tr id="th-p"></tr></thead><tbody id="tb-p"></tbody><tfoot id="tf-p"></tfoot></table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB PANE MOVIMENTI -->
+  <div id="tab-movimenti" class="tab-pane">
+    <div class="section sec-bank">
+      <div class="section-hdr"><div><div class="section-title">🏦 Movimenti Bancari</div><div class="section-title-sub">Riconciliazione estratto conto</div></div><div class="section-actions"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('csv-up').click()">📂 Carica CSV</button><input type="file" id="csv-up" accept=".csv,.txt" style="display:none" onchange="handleCSVUpload(event)"><button class="btn btn-ghost btn-sm" onclick="openAddMov()">➕ Movimento</button><button class="btn btn-ghost btn-sm" onclick="openModsModal()">⚙️ Metodi</button><button class="btn btn-ghost btn-sm" onclick="openBancheModal()">🏦 Gestisci Banche</button><button class="btn btn-ghost btn-sm" onclick="openMultiForcedClose()">🔒 Chiusura multipla</button></div></div>
+      <div class="section-body"><div class="filter-bar" style="border-color:#c7d2fe"><input type="text" class="search-box" id="srch-m" placeholder="🔍 Cerca descrizione..." oninput="renderMov()" style="flex:1"><div class="filter-group"><span>📅 Dal</span><input type="date" class="filter-date" id="fda-m" onchange="renderMov()"><span>→</span><input type="date" class="filter-date" id="fdb-m" onchange="renderMov()"></div><select class="fsel" id="ftip-m" onchange="renderMov()"><option value="">Entrate + Uscite</option><option value="e">Solo Entrate</option><option value="u">Solo Uscite</option></select><select class="fsel" id="frec-m" onchange="renderMov()"><option value="">Tutti gli stati</option><option value="no">🔴 Da riconciliare</option><option value="par">🟡 Parziale</option><option value="ok">🟢 Riconciliati</option><option value="forzato">🔵 Chiusi (forzato)</option></select><select class="fsel" id="f-banca-m" onchange="renderMov()"><option value="">Tutte le banche</option></select><button class="btn btn-neutral btn-sm" onclick="clearFilterMov()">✕ Azzera</button><span class="filter-count" id="fcount-m"></span></div>
+        <div class="tbl-wrap"><table><thead><tr id="th-m"></tr></thead><tbody id="tb-m"></tbody><tfoot id="tf-m"></tfoot></table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB PANE CASSA -->
+  <div id="tab-cassa" class="tab-pane">
+    <div class="section sec-cassa">
+      <div class="section-hdr">
+        <div class="section-title">💰 Cassa Contanti</div>
+        <div class="section-actions">
+          <button class="btn btn-ghost btn-sm" onclick="prelievoContanti()">💰 Prelievo contanti</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleCassaSection()">Mostra/Nascondi</button>
+          <button class="btn btn-ghost btn-sm" onclick="ricostruisciCassa()">🔄 Ricalcola Cassa</button>
+        </div>
+      </div>
+      <div class="section-body" id="cassa-body">
+        <div class="filter-bar" style="justify-content:space-between"><span><strong>Saldo attuale:</strong> <span id="cassa-saldo">€ 0,00</span></span><button class="btn btn-neutral btn-sm" onclick="refreshCassa()">Aggiorna</button></div>
+        <div class="tbl-wrap"><table style="min-width:600px"><thead><tr><th>Data</th><th>Descrizione</th><th class="num">Importo (€)</th></tr></thead><tbody id="cassa-movimenti"></tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB PANE SCADENZE -->
+  <div id="tab-scadenze" class="tab-pane">
+    <div class="section sec-scad">
+      <div class="section-hdr">
+        <div><div class="section-title">⏰ Scadenze Pagamenti</div><div class="section-title-sub">Fatture attive e passive non ancora saldate, per data di scadenza</div></div>
+        <div class="section-actions"><button class="btn btn-ghost btn-sm" onclick="renderScadenze()">🔄 Aggiorna</button></div>
+      </div>
+      <div class="section-body">
+        <div class="scad-stats" id="scad-stats"></div>
+        <div class="filter-bar">
+          <input type="text" class="search-box" id="srch-scad" placeholder="🔍 Cerca ragione sociale, numero fattura..." oninput="renderScadenze()" style="flex:1">
+          <select class="fsel" id="ftipo-scad" onchange="renderScadenze()">
+            <option value="">Attive + Passive</option>
+            <option value="a">📈 Solo Attive (da incassare)</option>
+            <option value="p">📉 Solo Passive (da pagare)</option>
+          </select>
+          <select class="fsel" id="fstato-scad" onchange="renderScadenze()">
+            <option value="">Tutte</option>
+            <option value="scadute">🔴 Scadute</option>
+            <option value="entro7">🟠 Entro 7 giorni</option>
+            <option value="entro30">🟡 Entro 30 giorni</option>
+            <option value="oltre">⚪ Oltre 30 giorni / senza scadenza</option>
+          </select>
+          <button class="btn btn-neutral btn-sm" onclick="document.getElementById('srch-scad').value='';document.getElementById('ftipo-scad').value='';document.getElementById('fstato-scad').value='';renderScadenze()">✕ Azzera</button>
+          <span class="filter-count" id="fcount-scad"></span>
+        </div>
+        <div class="tbl-wrap"><table><thead><tr><th style="width:28px">●</th><th>Tipo</th><th>Ragione Sociale</th><th>N. Fattura</th><th>Scadenza</th><th>Stato</th><th class="num">Residuo (€)</th><th></th></tr></thead><tbody id="tb-scad"></tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB PANE ARCHIVIO con sottotab -->
+  <div id="tab-archivio" class="tab-pane">
+    <div class="section sec-archive">
+      <div class="section-hdr">
+        <div class="section-title">🗄️ Archivio</div>
+        <div class="section-actions" style="gap:0.5rem;">
+          <button class="btn btn-ghost btn-sm" onclick="exportArchive()">📤 Esporta archivio</button>
+          <button class="btn btn-ghost btn-sm" onclick="importArchive()">📥 Importa archivio</button>
+        </div>
+      </div>
+      <div class="section-body" style="padding:0.5rem 0 0 0;">
+        <!-- sottotab archivio -->
+        <div class="sub-tabs">
+          <button class="sub-tab-btn active" data-subtab="arch-a" onclick="switchArchiveSubTab('arch-a')">📄 Attive archiviate</button>
+          <button class="sub-tab-btn" data-subtab="arch-p" onclick="switchArchiveSubTab('arch-p')">📄 Passive archiviate</button>
+          <button class="sub-tab-btn" data-subtab="arch-m" onclick="switchArchiveSubTab('arch-m')">🏦 Movimenti archiviati</button>
+        </div>
+        <!-- sottopane archivio attive -->
+        <div id="arch-a" class="sub-tab-pane active" style="padding:0.5rem 0.8rem 0.8rem;">
+          <div class="filter-bar">
+            <input type="text" class="search-box" id="srch-arch-a" placeholder="🔍 Cerca ragione sociale, numero fattura..." oninput="renderArchiveDocs('a')" style="flex:1">
+            <div class="filter-group"><span>📅 Dal</span><input type="date" class="filter-date" id="fda-arch-a" onchange="renderArchiveDocs('a')"><span>→</span><input type="date" class="filter-date" id="fdb-arch-a" onchange="renderArchiveDocs('a')"></div>
+            <select class="fsel" id="period-arch-a" onchange="renderArchiveDocs('a')"><option value="all">Tutti i periodi</option></select>
+            <select class="fsel" id="fmod-arch-a" onchange="renderArchiveDocs('a')"><option value="">Tutti i metodi</option></select>
+            <select class="fsel" id="fst-arch-a" onchange="renderArchiveDocs('a')"><option value="">Tutti</option><option value="r">🔴 Da pagare</option><option value="y">🟡 Parziale</option><option value="g">🟢 Pagate</option></select>
+            <button class="btn btn-neutral btn-sm" onclick="clearArchiveFilter('a')">✕ Azzera</button>
+            <button class="btn btn-primary btn-sm" onclick="restoreSelectedArchiveDocs('a')">⬅️ Ripristina selezionati</button>
+            <span class="filter-count" id="fcount-arch-a"></span>
+          </div>
+          <div class="tbl-wrap">
+            <table><thead><tr id="th-arch-a"></tr></thead><tbody id="tb-arch-a"></tbody><tfoot id="tf-arch-a"></tfoot></table>
+          </div>
+        </div>
+        <!-- sottopane archivio passive -->
+        <div id="arch-p" class="sub-tab-pane" style="padding:0.5rem 0.8rem 0.8rem;">
+          <div class="filter-bar">
+            <input type="text" class="search-box" id="srch-arch-p" placeholder="🔍 Cerca ragione sociale, numero fattura..." oninput="renderArchiveDocs('p')" style="flex:1">
+            <div class="filter-group"><span>📅 Dal</span><input type="date" class="filter-date" id="fda-arch-p" onchange="renderArchiveDocs('p')"><span>→</span><input type="date" class="filter-date" id="fdb-arch-p" onchange="renderArchiveDocs('p')"></div>
+            <select class="fsel" id="period-arch-p" onchange="renderArchiveDocs('p')"><option value="all">Tutti i periodi</option></select>
+            <select class="fsel" id="fmod-arch-p" onchange="renderArchiveDocs('p')"><option value="">Tutti i metodi</option></select>
+            <select class="fsel" id="fst-arch-p" onchange="renderArchiveDocs('p')"><option value="">Tutti</option><option value="r">🔴 Da pagare</option><option value="y">🟡 Parziale</option><option value="g">🟢 Pagate</option></select>
+            <button class="btn btn-neutral btn-sm" onclick="clearArchiveFilter('p')">✕ Azzera</button>
+            <button class="btn btn-primary btn-sm" onclick="restoreSelectedArchiveDocs('p')">⬅️ Ripristina selezionati</button>
+            <span class="filter-count" id="fcount-arch-p"></span>
+          </div>
+          <div class="tbl-wrap">
+            <table><thead><tr id="th-arch-p"></tr></thead><tbody id="tb-arch-p"></tbody><tfoot id="tf-arch-p"></tfoot></table>
+          </div>
+        </div>
+        <!-- sottopane archivio movimenti -->
+        <div id="arch-m" class="sub-tab-pane" style="padding:0.5rem 0.8rem 0.8rem;">
+          <div class="filter-bar">
+            <input type="text" class="search-box" id="srch-arch-m" placeholder="🔍 Cerca descrizione..." oninput="renderArchiveMovs()" style="flex:1">
+            <div class="filter-group"><span>📅 Dal</span><input type="date" class="filter-date" id="fda-arch-m" onchange="renderArchiveMovs()"><span>→</span><input type="date" class="filter-date" id="fdb-arch-m" onchange="renderArchiveMovs()"></div>
+            <select class="fsel" id="ftip-arch-m" onchange="renderArchiveMovs()"><option value="">Entrate + Uscite</option><option value="e">Solo Entrate</option><option value="u">Solo Uscite</option></select>
+            <select class="fsel" id="frec-arch-m" onchange="renderArchiveMovs()"><option value="">Tutti</option><option value="no">🔴 Da riconciliare</option><option value="par">🟡 Parziale</option><option value="ok">🟢 Riconciliati</option><option value="forzato">🔵 Chiusi (forzato)</option></select>
+            <select class="fsel" id="f-banca-arch-m" onchange="renderArchiveMovs()"><option value="">Tutte le banche</option></select>
+            <button class="btn btn-neutral btn-sm" onclick="clearArchiveMovFilter()">✕ Azzera</button>
+            <button class="btn btn-primary btn-sm" onclick="restoreSelectedArchiveMovs()">⬅️ Ripristina selezionati</button>
+            <span class="filter-count" id="fcount-arch-m"></span>
+          </div>
+          <div class="tbl-wrap">
+            <table><thead><tr id="th-arch-m"></tr></thead><tbody id="tb-arch-m"></tbody><tfoot id="tf-arch-m"></tfoot></table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<!-- MODALI (v2.22: si chiudono anche con il tasto Esc) -->
+<div class="overlay" id="m-mods"><div class="modal" style="max-width:480px"><div class="modal-hdr"><div class="modal-title">⚙️ Metodi di Pagamento</div><button class="ico" onclick="closeModal('m-mods')">✕</button></div><div class="modal-body"><div id="mods-base-list"></div><div id="mods-custom-list"></div><div style="display:flex;gap:.5rem;margin-top:1rem"><input type="text" class="finput" id="new-mod-label" placeholder="Nome nuovo metodo"><button class="btn btn-blue btn-sm" onclick="saveNewMod()">➕ Aggiungi</button></div></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-mods')">Chiudi</button></div></div></div>
+<div class="overlay" id="m-banche"><div class="modal" style="max-width:480px"><div class="modal-hdr"><div class="modal-title">🏦 Gestione Banche</div><button class="ico" onclick="closeModal('m-banche')">✕</button></div><div class="modal-body"><div id="banche-list"></div><div style="display:flex;gap:.5rem;margin-top:1rem"><input type="text" class="finput" id="new-banca-nome" placeholder="Nome banca (es. Intesa, Unicredit)"><button class="btn btn-blue btn-sm" onclick="saveNuovaBanca()">➕ Aggiungi</button></div></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-banche')">Chiudi</button></div></div></div>
+<div class="overlay" id="m-csv"><div class="modal" style="max-width:560px"><div class="modal-hdr"><div class="modal-title">📂 Mappa Colonne CSV</div><button class="ico" onclick="closeModal('m-csv')">✕</button></div><div class="modal-body" id="csv-map-body"></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-csv')">Annulla</button><button class="btn btn-blue" onclick="confirmCSVMap()">✅ Importa</button></div></div></div>
+<div class="overlay" id="m-rec"><div class="modal" style="max-width:800px"><div class="modal-hdr"><div><div class="modal-title">🔗 Riconciliazione Movimento</div><div class="modal-sub" id="rec-info"></div></div><button class="ico" onclick="closeModal('m-rec')">✕</button></div><div class="modal-body" id="rec-body"></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-rec')">Chiudi</button><button class="btn btn-blue" onclick="confirmRec()">✅ Salva riconciliazione</button></div></div></div>
+<div class="overlay" id="m-mov"><div class="modal" style="max-width:480px"><div class="modal-hdr"><div class="modal-title" id="m-mov-title">Aggiungi Movimento</div><button class="ico" onclick="closeModal('m-mov')">✕</button></div><div class="modal-body"><div class="fg2"><div class="fg"><label class="flabel">Data</label><input type="date" class="finput" id="mov-data"></div><div class="fg"><label class="flabel">Tipo</label><select class="fselect" id="mov-tipo"><option value="e">Entrata</option><option value="u">Uscita</option></select></div><div class="fg span2"><label class="flabel">Descrizione</label><input type="text" class="finput" id="mov-desc"></div><div class="fg"><label class="flabel">Importo</label><input type="number" class="finput" id="mov-imp" step="0.01"></div><div class="fg"><label class="flabel">Banca</label><select class="fselect" id="mov-banca"></select></div></div></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-mov')">Annulla</button><button class="btn btn-blue" onclick="saveMov()">Salva</button></div></div></div>
+<div class="overlay" id="m-inv"><div class="modal"><div class="modal-hdr"><div><div class="modal-title" id="m-inv-title">Aggiungi Fattura</div><div class="modal-sub" id="m-inv-sub"></div></div><button class="ico" onclick="closeModal('m-inv')">✕</button></div><div class="modal-body"><div class="fg2"><div class="fg span2 ac-wrap"><label class="flabel">Ragione Sociale</label><input type="text" class="finput" id="f-rs" oninput="acUpdate()" onblur="acHide()"><div class="ac-list" id="ac-list"></div></div><div class="fg"><label class="flabel">Tipo</label><select class="fselect" id="f-tipo"><option value="fattura">Fattura</option><option value="proforma">Proforma</option><option value="nota_credito">Nota Credito</option><option value="acconto">Acconto</option></select></div><div class="fg"><label class="flabel">Numero</label><input type="text" class="finput" id="f-num"></div><div class="fg"><label class="flabel">Data</label><input type="date" class="finput" id="f-data"></div><div class="fg span2"><div class="iva-box"><div class="iva-hdr"><div>Aliquota</div><div>Imponibile</div><div>IVA</div><div></div></div><div id="iva-lines"></div><button type="button" class="btn btn-neutral btn-sm" onclick="addIvaLine()">＋ Aggiungi aliquota</button><div class="iva-totals"><div class="iva-tot-item"><div class="iva-tot-lbl">Tot. Imponibile</div><div class="iva-tot-val" id="ft-imp">€ 0,00</div></div><div class="iva-tot-item"><div class="iva-tot-lbl">Tot. IVA</div><div class="iva-tot-val" id="ft-iva">€ 0,00</div></div><div class="iva-tot-item"><div class="iva-tot-lbl">Totale</div><div class="iva-tot-val" id="ft-tot">€ 0,00</div></div></div></div></div><div class="fg"><label class="flabel">Mod. Pagamento</label><select class="fselect" id="f-modpag"></select></div><div class="fg"><label class="flabel">Valuta</label><select class="fselect" id="f-valuta"><option value="EUR">EUR</option><option value="USD">USD</option><option value="GBP">GBP</option></select></div><div class="fg"><label class="flabel">Scadenza</label><input type="date" class="finput" id="f-scad"></div><div class="fg span2"><label class="flabel">Note</label><textarea class="ftextarea" id="f-note"></textarea></div><div class="fg span2"><label class="flabel">PDF</label><input type="file" class="finput" id="f-pdf" accept=".pdf"><div id="f-pdf-info"><button id="f-remove-pdf" class="btn btn-danger btn-sm" data-remove="0" onclick="toggleRemovePdf(this)" style="display:none">🗑️ Rimuovi PDF</button></div></div></div></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-inv')">Annulla</button><button class="btn" id="btn-save" onclick="saveInv()">💾 Salva</button></div></div></div>
+<div class="overlay" id="m-pay"><div class="modal"><div class="modal-hdr"><div><div class="modal-title">💳 Gestione Pagamenti</div><div class="modal-sub" id="pay-info"></div></div><button class="ico" onclick="closeModal('m-pay')">✕</button></div><div class="modal-body" id="pay-body"></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-pay')">Chiudi</button></div></div></div>
+<div class="overlay" id="m-edit-pay-method"><div class="modal" style="max-width:400px"><div class="modal-hdr"><div class="modal-title">✏️ Modifica Modalità di Pagamento</div><button class="ico" onclick="closeModal('m-edit-pay-method')">✕</button></div><div class="modal-body"><div class="fg"><label class="flabel">Nuova modalità</label><select class="fselect" id="edit-pay-method-select"></select></div></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-edit-pay-method')">Annulla</button><button class="btn btn-blue" onclick="confirmEditPaymentMethod()">Salva</button></div></div></div>
+<!-- MODALE MODIFICA COMPLETA PAGAMENTO (data, importo, metodo) -->
+<div class="overlay" id="m-edit-payment">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-hdr">
+      <div class="modal-title">✏️ Modifica Pagamento</div>
+      <button class="ico" onclick="closeModal('m-edit-payment')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="fg">
+        <label class="flabel">Data</label>
+        <input type="date" class="finput" id="edit-pay-data">
+      </div>
+      <div class="fg">
+        <label class="flabel">Importo (€)</label>
+        <input type="number" class="finput" id="edit-pay-amount" step="0.01">
+      </div>
+      <div class="fg">
+        <label class="flabel">Metodo</label>
+        <select class="fselect" id="edit-pay-mod"></select>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-neutral" onclick="closeModal('m-edit-payment')">Annulla</button>
+      <button class="btn btn-blue" onclick="confirmEditPayment()">Salva modifiche</button>
+    </div>
+  </div>
+</div>
+<div class="overlay" id="m-link-payment"><div class="modal" style="max-width:500px"><div class="modal-hdr"><div class="modal-title">🔗 Collega pagamento a movimento bancario</div><button class="ico" onclick="closeModal('m-link-payment')">✕</button></div><div class="modal-body" id="link-mov-modal-body"></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-link-payment')">Annulla</button><button class="btn btn-blue" onclick="confirmLinkPayment()">Conferma</button></div></div></div>
+<div class="overlay" id="m-pdf"><div class="modal" style="max-width:920px"><div class="modal-hdr"><div class="modal-title" id="pdf-title">📄 Anteprima PDF</div><button class="ico" onclick="closeModal('m-pdf')">✕</button></div><div class="modal-body"><embed id="pdf-embed" class="pdf-embed" type="application/pdf" width="100%" height="580px" style="border:none; border-radius:8px" /></div></div></div>
+<div class="overlay" id="m-multi-close"><div class="modal" style="max-width:500px"><div class="modal-hdr"><div class="modal-title">🔒 Chiusura forzata multipla</div><button class="ico" onclick="closeModal('m-multi-close')">✕</button></div><div class="modal-body" id="multi-close-body"></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-multi-close')">Annulla</button><button class="btn btn-blue" onclick="confirmMultiForcedClose()">Conferma</button></div></div></div>
+<div class="overlay" id="m-rollover"><div class="modal" style="max-width:450px"><div class="modal-hdr"><div class="modal-title">📦 Rollover fine anno</div><button class="ico" onclick="closeModal('m-rollover')">✕</button></div><div class="modal-body"><div class="fg"><label class="flabel">Data di cutoff (es. 31/12/2025)</label><input type="date" id="rollover-cutoff" class="finput" onchange="updateRolloverPreview()"></div><div id="rollover-preview" style="margin:1rem 0"></div><p style="font-size:0.8rem; color:#f97316;">⚠️ Verranno spostati in archivio solo i documenti e movimenti completamente saldati/riconciliati e con data ≤ quella selezionata. La cassa contanti non viene modificata.</p></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-rollover')">Annulla</button><button class="btn btn-blue" onclick="confirmRollover()">📦 Archivia</button></div></div></div>
+<div class="overlay" id="m-credit-note"><div class="modal" style="max-width:500px"><div class="modal-hdr"><div class="modal-title">📄 Compensazione con Nota di Credito</div><button class="ico" onclick="closeModal('m-credit-note')">✕</button></div><div class="modal-body" id="credit-note-body"></div><div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-credit-note')">Chiudi</button></div></div></div>
+<div class="overlay" id="m-report-iva">
+  <div class="modal" style="max-width:800px">
+    <div class="modal-hdr">
+      <div><div class="modal-title">🧾 Report IVA periodico</div><div class="modal-sub">Liquidazione per aliquota, basata sulla data documento (fatture, note di credito, acconti — le proforma non sono conteggiate)</div></div>
+      <button class="ico" onclick="closeModal('m-report-iva')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="fg2" style="margin-bottom:1rem">
+        <div class="fg"><label class="flabel">Dal</label><input type="date" class="finput" id="riva-dal"></div>
+        <div class="fg"><label class="flabel">Al</label><input type="date" class="finput" id="riva-al"></div>
+      </div>
+      <div style="display:flex;gap:.5rem;margin-bottom:1rem">
+        <button class="btn btn-primary btn-sm" onclick="renderReportIVA()">🔄 Genera</button>
+        <button class="btn btn-neutral btn-sm" onclick="setReportIVAPeriodo('mese')">Mese corrente</button>
+        <button class="btn btn-neutral btn-sm" onclick="setReportIVAPeriodo('trimestre')">Trimestre corrente</button>
+        <button class="btn btn-neutral btn-sm" onclick="setReportIVAPeriodo('anno')">Anno corrente</button>
+        <button class="btn btn-neutral btn-sm" onclick="exportReportIVACSV()">📊 Esporta CSV</button>
+      </div>
+      <div id="riva-body"></div>
+    </div>
+    <div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-report-iva')">Chiudi</button></div>
+  </div>
+</div>
+<div class="overlay" id="m-pdf-audit">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-hdr">
+      <div><div class="modal-title">🔍 Verifica PDF allegati</div><div class="modal-sub">Controlla che i PDF salvati siano davvero leggibili, non solo presenti come voce in archivio</div></div>
+      <button class="ico" onclick="closeModal('m-pdf-audit')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:1rem"><button class="btn btn-primary btn-sm" onclick="runPdfAudit()">🔄 Avvia verifica</button></div>
+      <div id="pdf-audit-body"><p style="color:#a8a29e">Premi "Avvia verifica" per controllare tutti i PDF allegati alle fatture attive, passive e archiviate.</p></div>
+    </div>
+    <div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-pdf-audit')">Chiudi</button></div>
+  </div>
+</div>
+<div class="overlay" id="m-auto-rules">
+  <div class="modal" style="max-width:780px">
+    <div class="modal-hdr">
+      <div><div class="modal-title">⚙️ Chiusura Automatica per Regole</div><div class="modal-sub">Movimenti ricorrenti senza fattura (commissioni, F24, stipendi, assicurazioni...) chiusi in base a parole chiave nella descrizione — mai in automatico senza conferma</div></div>
+      <button class="ico" onclick="closeModal('m-auto-rules')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="rec-section-lbl">Regole salvate</div>
+      <div class="tbl-wrap" style="margin-bottom:1rem"><table><thead><tr><th>Parole chiave</th><th>Categoria</th><th>Metodo</th><th></th></tr></thead><tbody id="tb-regole"></tbody></table></div>
+      <div class="fg2" style="margin-bottom:1rem;align-items:flex-end">
+        <div class="fg"><label class="flabel">Parole chiave (separate da virgola)</label><input type="text" class="finput" id="regola-pattern" placeholder="es. f24, agenzia entrate"></div>
+        <div class="fg"><label class="flabel">Categoria</label><select class="fselect" id="regola-cat"></select></div>
+        <div class="fg"><label class="flabel">Metodo pagamento</label><select class="fselect" id="regola-mod"></select></div>
+        <div class="fg"><button class="btn btn-neutral btn-sm" onclick="addRegolaChiusura()">➕ Aggiungi regola</button></div>
+      </div>
+      <hr style="margin:1rem 0;border-color:#e5e3dc">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+        <div class="rec-section-lbl" style="margin:0">Applica ai movimenti aperti</div>
+        <button class="btn btn-primary btn-sm" onclick="scanAutoRules()">🔍 Scansiona movimenti</button>
+      </div>
+      <div id="auto-rules-preview"><p style="color:#a8a29e">Premi "Scansiona movimenti" per vedere quali movimenti aperti corrispondono alle regole salvate.</p></div>
+    </div>
+    <div class="modal-ftr"><button class="btn btn-neutral" onclick="closeModal('m-auto-rules')">Chiudi</button><button class="btn btn-primary" onclick="confirmAutoRules()">✅ Conferma chiusura selezionati</button></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+// ===== SWITCH TAB PRINCIPALI =====
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  document.querySelector(`.tab-btn[data-tab="${tabId}"]`).classList.add('active');
+  try { localStorage.setItem('fmp_lastTab', tabId); } catch (e) {}
+  if (tabId === 'tab-movimenti' && typeof renderMov === 'function') renderMov();
+  if (tabId === 'tab-cassa' && typeof refreshCassa === 'function') refreshCassa();
+  if (tabId === 'tab-scadenze' && typeof renderScadenze === 'function') renderScadenze();
+  if (tabId === 'tab-archivio') {
+    const activeSub = document.querySelector('.sub-tab-pane.active');
+    if (!activeSub) {
+      const firstSub = document.querySelector('.sub-tab-pane');
+      if (firstSub) firstSub.classList.add('active');
+      const firstBtn = document.querySelector('.sub-tab-btn');
+      if (firstBtn) firstBtn.classList.add('active');
+    }
+    if (typeof renderArchiveDocs === 'function') {
+      renderArchiveDocs('a');
+      renderArchiveDocs('p');
+      renderArchiveMovs();
+    }
+  }
+}
+
+// ===== SWITCH SOTTOTAB ARCHIVIO =====
+function switchArchiveSubTab(subId) {
+  document.querySelectorAll('.sub-tab-pane').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.sub-tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById(subId).classList.add('active');
+  document.querySelector(`.sub-tab-btn[data-subtab="${subId}"]`).classList.add('active');
+  if (subId === 'arch-a' && typeof renderArchiveDocs === 'function') renderArchiveDocs('a');
+  if (subId === 'arch-p' && typeof renderArchiveDocs === 'function') renderArchiveDocs('p');
+  if (subId === 'arch-m' && typeof renderArchiveMovs === 'function') renderArchiveMovs();
+}
+
+// v2.22: toggleZone e toggleChart erano definite sia qui sia in app.js (questa copia sostituiva
+// quella di app.js): ora esiste solo la versione in app.js.
+
+// ===== CHIUSURA MODALI CON ESC (v2.22) =====
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Escape') return;
+  const aperti = document.querySelectorAll('.overlay.open');
+  if (aperti.length) aperti[aperti.length - 1].classList.remove('open');
+});
+
+// ===== INIT TAB (v2.22: riapre l'ultima scheda usata) =====
+document.addEventListener('DOMContentLoaded', function() {
+  const ver = document.getElementById('app-version');
+  if (ver && typeof APP_VERSION !== 'undefined') ver.textContent = 'v' + APP_VERSION;
+  let ultima = null;
+  try { ultima = localStorage.getItem('fmp_lastTab'); } catch (e) {}
+  const btn = (ultima && document.querySelector('.tab-btn[data-tab="' + ultima + '"]')) || document.querySelector('.tab-btn');
+  if (btn) btn.click();
+});
+</script>
+</body>
+</html>

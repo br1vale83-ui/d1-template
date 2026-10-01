@@ -80,6 +80,22 @@
  *             scadenza al 16 del mese successivo al pagamento), esportabile in CSV
  *           - badge RIT / SPLIT in tabella, export CSV fatture con colonne ritenuta/IVA split/netto
  *           - campi opzionali: i dati esistenti restano validi (senza ritenuta né split)
+ * v2.24.0 — import PDF riscritto e ritenute multiple
+ *           - PDF: righe ricostruite dalle coordinate (prima tutta la pagina diventava una "riga" e
+ *             la ragione sociale era l'inizio della pagina); etichetta e valore anche in colonne
+ *             diverse; fornitore scelto per punteggio (forma societaria, intestazione, ripetizioni,
+ *             vicinanza alla P.IVA) escludendo il blocco cliente ("Spett.le", "Bill to"...) e la propria
+ *             azienda; riconosce i fornitori già in archivio (anche per P.IVA); numero, data, scadenza,
+ *             totale, imponibile/IVA, ritenuta d'acconto ed ENASARCO in italiano, inglese, tedesco,
+ *             francese e spagnolo; campi incerti evidenziati in giallo; avviso duplicato
+ *           - "🏢 Azienda": propria ragione sociale/P.IVA (impostate in automatico al primo import XML)
+ *           - ritenute: più righe per documento (ritenuta d'acconto professionisti/provvigioni,
+ *             ENASARCO, INPS, altre casse) con tipo, base, aliquota e importo; modelli rapidi per
+ *             professionista (anche con cassa 4%/2%), agente (23% sul 50% o sul 20% + ENASARCO),
+ *             condominio; import XML di tutti i DatiRitenuta con tipo e causale
+ *           - riepilogo ritenute per pagamento (quote proporzionali per le rate), F24 con codice 1040 /
+ *             1038, ENASARCO con scadenze trimestrali e quota ditta stimata
+ *           - P.IVA della controparte salvata dagli XML (dal 2.24) per riconoscere i fornitori nei PDF
  */
 
 // ======================== STATO GLOBALE ========================
@@ -2711,8 +2727,19 @@ function parseXML(str, type, fname) {
   var aliqDisplay = aliqSet.size ? Array.from(aliqSet).join(', ') : '0%';
   var totDoc = round2((parseFloat(qt2(doc, 'ImportoTotaleDocumento')) || (imponibile + totiva)) * sign);
   // v2.23: ritenute (DatiRitenuta può ripetersi: ritenuta d'acconto, contributi INPS, ENASARCO...)
-  var ritenuta = 0;
-  qsa2(datiGen || doc, 'DatiRitenuta').forEach(function(r) { ritenuta = round2(ritenuta + Math.abs(parseFloat(qt2(r, 'ImportoRitenuta')) || 0)); });
+  // v2.24: ogni DatiRitenuta diventa una riga (tipo RT01..RT06, causale, aliquota, base, importo)
+  var ritenute = [];
+  qsa2(datiGen || doc, 'DatiRitenuta').forEach(function(r) {
+    var impR = round2(Math.abs(parseFloat(qt2(r, 'ImportoRitenuta')) || 0));
+    if (!impR) return;
+    var aliqR = parseFloat(qt2(r, 'AliquotaRitenuta')) || 0;
+    ritenute.push({ tipo: qt2(r, 'TipoRitenuta') || 'RT01', causale: qt2(r, 'CausalePagamento') || '', aliq: aliqR, base: aliqR ? round2(impR / aliqR * 100) : 0, importo: impR });
+  });
+  var ritenuta = round2(ritenute.reduce(function(s, r) { return s + r.importo; }, 0));
+  // v2.24: P.IVA della controparte (serve a riconoscere il fornitore negli import da PDF) e dati
+  // della propria azienda (cessionario sulle passive, cedente sulle attive)
+  function pivaDi(sec) { var idf = sec ? qs2(sec, 'IdFiscaleIVA') : null; return idf ? (qt2(idf, 'IdPaese') + qt2(idf, 'IdCodice')).toUpperCase() : ''; }
+  var controparte = type === 'a' ? cession : cedente, propria = type === 'a' ? cedente : cession;
   var modXML = qt2(doc, 'ModalitaPagamento') || '';
   var modMap = { MP01: 'contanti', MP02: 'assegno', MP04: 'carta', MP05: 'bonifico', MP09: 'riba', MP12: 'rid', MP08: 'rid' };
   return {
@@ -2727,7 +2754,10 @@ function parseXML(str, type, fname) {
     tot: totDoc,
     righeIva: righeIva.length ? righeIva.map(function(r) { var o = { aliq: r.aliq, imp: r.imp * sign, iva: r.iva * sign }; if (r.esig) o.esig = r.esig; return o; }) : [{ aliq: 0, imp: round2(imponibile * sign), iva: round2(totiva * sign) }],
     ritenuta: ritenuta,
+    ritenute: ritenute,
     ivaSplit: ivaSplit,
+    piva: pivaDi(controparte),
+    _own: { rs: getRS(propria), piva: pivaDi(propria) },
     modpag: modMap[modXML] || '',
     scad: scadXML, note: '',
     hasPdf: false, pdfName: null,
@@ -2746,6 +2776,9 @@ async function handleFilesArr(files, type) {
     try {
       var text = await f.text();
       var inv = parseXML(text, type, f.name);
+      // v2.24: impara automaticamente i dati della propria azienda dal primo XML importato
+      if (inv._own && inv._own.piva && !(S.azienda && S.azienda.piva)) S.azienda = { rs: inv._own.rs, piva: inv._own.piva };
+      delete inv._own;
       // v2.22: il duplicato considera anche l'ANNO: i fornitori ripartono dal n. 1 ogni anno, quindi
       // stessa ragione sociale + stesso numero in anni diversi sono fatture diverse. Controlla anche
       // l'archivio, per non reimportare fatture già archiviate.
@@ -2903,11 +2936,39 @@ function renderTotals(type, data) {
   }).join('');
   tf.innerHTML = '<tr>' + cells + '</tr>';
 }
-// ======================== RITENUTA D'ACCONTO E SPLIT PAYMENT (v2.23) ========================
+// ======================== RITENUTE, CONTRIBUTI E SPLIT PAYMENT (v2.23 → v2.24) ========================
 // Importi sempre positivi, indipendenti dal segno della nota di credito.
-// - ritenuta: trattenuta dal cliente e versata da lui all'Erario (F24) → non arriva mai in banca
-// - ivaSplit: IVA che il cliente PA versa direttamente all'Erario (EsigibilitaIVA = S) → idem
-function ritenutaDoc(i) { return Math.abs(parseFloat(i && i.ritenuta) || 0); }
+// - ritenute: elenco di trattenute fatte dal cliente sul documento e versate da lui (non arrivano mai
+//   in banca): ritenuta d'acconto IRPEF, contributo ENASARCO quota agente, INPS, altre casse.
+//   Ogni riga: { tipo: 'RT01'..'RT06' (codici FatturaPA), causale, base, aliq, importo }.
+//   Il vecchio campo numerico `ritenuta` (v2.23) resta come totale e viene letto come una riga RT01.
+// - ivaSplit: IVA che il cliente PA versa direttamente all'Erario (EsigibilitaIVA = S).
+var TIPI_RITENUTA = [
+  { v: 'RT01|A', tipo: 'RT01', causale: 'A', l: "Ritenuta d'acconto – professionisti (cod. 1040)", b: 'Rit. acconto' },
+  { v: 'RT01|R', tipo: 'RT01', causale: 'R', l: "Ritenuta d'acconto – provvigioni agenti (cod. 1038)", b: 'Rit. provvigioni' },
+  { v: 'RT02|', tipo: 'RT02', causale: '', l: "Ritenuta d'acconto – persone giuridiche", b: 'Rit. acconto PG' },
+  { v: 'RT04|', tipo: 'RT04', causale: '', l: 'ENASARCO – quota agente', b: 'ENASARCO' },
+  { v: 'RT03|', tipo: 'RT03', causale: '', l: 'Contributo INPS', b: 'INPS' },
+  { v: 'RT05|', tipo: 'RT05', causale: '', l: 'Contributo ENPAM', b: 'ENPAM' },
+  { v: 'RT06|', tipo: 'RT06', causale: '', l: 'Altro contributo previdenziale', b: 'Altro contributo' }
+];
+var ENASARCO_ALIQ_AGENTE = 8.5; // quota a carico agente (metà del 17%): modificabile riga per riga
+function ritTipoValue(r) {
+  if (r.tipo === 'RT01') return (r.causale === 'Q' || r.causale === 'R') ? 'RT01|R' : 'RT01|A';
+  return (r.tipo || 'RT06') + '|';
+}
+function ritTipoDef(r) { var v = ritTipoValue(r); return TIPI_RITENUTA.filter(function(t) { return t.v === v; })[0] || TIPI_RITENUTA[6]; }
+function ritTipoBreve(r) { return ritTipoDef(r).b; }
+function codiceTributoRit(r) {
+  if (r.tipo !== 'RT01' && r.tipo !== 'RT02') return '';
+  return (r.causale === 'Q' || r.causale === 'R') ? '1038' : '1040';
+}
+function ritenuteDoc(i) {
+  if (i && Array.isArray(i.ritenute) && i.ritenute.length) return i.ritenute;
+  var v = Math.abs(parseFloat(i && i.ritenuta) || 0);
+  return v > 0 ? [{ tipo: 'RT01', causale: 'A', base: 0, aliq: 0, importo: v }] : [];
+}
+function ritenutaDoc(i) { return round2(ritenuteDoc(i).reduce(function(s, r) { return s + Math.abs(parseFloat(r.importo) || 0); }, 0)); }
 function ivaSplitDoc(i) { return Math.abs(parseFloat(i && i.ivaSplit) || 0); }
 // Importo che si incassa/paga davvero: è la base di residuo, stato e riconciliazione.
 function nettoDaPagare(i) {
@@ -2915,10 +2976,98 @@ function nettoDaPagare(i) {
   return Math.max(0, round2(base - ritenutaDoc(i) - ivaSplitDoc(i)));
 }
 function badgeRitSplit(i) {
-  var out = '';
-  if (ritenutaDoc(i) > 0) out += ' <span class="badge badge-rit" title="Ritenuta d\'acconto € ' + fmt(ritenutaDoc(i)) + '">RIT</span>';
+  var out = '', rits = ritenuteDoc(i);
+  var irpef = rits.filter(function(r) { return r.tipo === 'RT01' || r.tipo === 'RT02'; });
+  var altri = rits.filter(function(r) { return r.tipo !== 'RT01' && r.tipo !== 'RT02'; });
+  function tip(arr) { return arr.map(function(r) { return ritTipoBreve(r) + (r.aliq ? ' ' + fmt(r.aliq) + '%' : '') + ' € ' + fmt(r.importo); }).join(' · '); }
+  if (irpef.length) out += ' <span class="badge badge-rit" title="' + esc(tip(irpef)) + '">RIT</span>';
+  altri.forEach(function(r) { out += ' <span class="badge badge-ena" title="' + esc(tip([r])) + '">' + (r.tipo === 'RT04' ? 'ENA' : 'PREV') + '</span>'; });
   if (ivaSplitDoc(i) > 0) out += ' <span class="badge badge-split" title="Split payment: IVA € ' + fmt(ivaSplitDoc(i)) + ' versata dal cliente">SPLIT</span>';
   return out;
+}
+
+// ---- editor righe ritenute nel form fattura
+function ritOptionsHtml(sel) {
+  return TIPI_RITENUTA.map(function(t) { return '<option value="' + t.v + '"' + (t.v === sel ? ' selected' : '') + '>' + esc(t.l) + '</option>'; }).join('');
+}
+function addRitLine(r) {
+  var box = document.getElementById('rit-lines');
+  if (!box) return;
+  r = r || { tipo: 'RT01', causale: 'A', base: totImponibileForm(), aliq: 20, importo: 0 };
+  var line = document.createElement('div');
+  line.className = 'rit-line';
+  line.setAttribute('data-causale', r.causale || '');
+  line.setAttribute('data-tipo', r.tipo || '');
+  var base = parseFloat(r.base) || 0, aliq = parseFloat(r.aliq) || 0;
+  var imp = parseFloat(r.importo) || (base && aliq ? round2(base * aliq / 100) : 0);
+  line.innerHTML = '<select class="fselect rit-tipo">' + ritOptionsHtml(ritTipoValue(r)) + '</select>' +
+    '<input type="number" class="finput rit-base" step="0.01" min="0" placeholder="Base €" title="Base di calcolo (€)" value="' + (base ? base.toFixed(2) : '') + '">' +
+    '<input type="number" class="finput rit-aliq" step="0.01" min="0" placeholder="%" title="Aliquota %" value="' + (aliq || '') + '">' +
+    '<input type="number" class="finput rit-imp" step="0.01" min="0" placeholder="Importo €" title="Importo trattenuto (€)" value="' + (imp ? imp.toFixed(2) : '') + '">' +
+    '<button type="button" class="ico" style="color:#dc2626" title="Rimuovi">🗑️</button>';
+  var sel = line.querySelector('.rit-tipo'), inB = line.querySelector('.rit-base'), inA = line.querySelector('.rit-aliq'), inI = line.querySelector('.rit-imp');
+  function ricalcola() {
+    var b = parseFloat(inB.value) || 0, a = parseFloat(inA.value) || 0;
+    if (b > 0 && a > 0) inI.value = round2(b * a / 100).toFixed(2);
+    updateIvaTotals();
+  }
+  inB.addEventListener('input', ricalcola);
+  inA.addEventListener('input', ricalcola);
+  inI.addEventListener('input', function() { updateIvaTotals(); });
+  sel.addEventListener('change', function() {
+    var def = TIPI_RITENUTA.filter(function(t) { return t.v === sel.value; })[0];
+    line.setAttribute('data-causale', def ? def.causale : '');
+    line.setAttribute('data-tipo', def ? def.tipo : '');
+    if (def && def.tipo === 'RT04' && !(parseFloat(inA.value) > 0)) { inA.value = ENASARCO_ALIQ_AGENTE; ricalcola(); }
+  });
+  line.querySelector('.ico').addEventListener('click', function() { line.remove(); updateIvaTotals(); });
+  box.appendChild(line);
+  updateIvaTotals();
+}
+function setRitLines(arr) {
+  var box = document.getElementById('rit-lines');
+  if (!box) return;
+  box.innerHTML = '';
+  (arr || []).forEach(function(r) { addRitLine(r); });
+  updateIvaTotals();
+}
+function readRitLines() {
+  var out = [];
+  document.querySelectorAll('#rit-lines .rit-line').forEach(function(line) {
+    var def = TIPI_RITENUTA.filter(function(t) { return t.v === line.querySelector('.rit-tipo').value; })[0] || TIPI_RITENUTA[0];
+    var importo = round2(Math.abs(parseFloat(line.querySelector('.rit-imp').value) || 0));
+    if (!importo) return;
+    // la causale originale (es. dall'XML) resta se il tipo non è stato cambiato
+    var causale = line.getAttribute('data-causale');
+    if (def.tipo === 'RT01') { if (ritTipoValue({ tipo: 'RT01', causale: causale }) !== def.v) causale = def.causale; }
+    else if (def.tipo !== line.getAttribute('data-tipo')) causale = def.causale;
+    out.push({ tipo: def.tipo, causale: causale || '', base: round2(parseFloat(line.querySelector('.rit-base').value) || 0), aliq: parseFloat(line.querySelector('.rit-aliq').value) || 0, importo: importo });
+  });
+  return out;
+}
+function totImponibileForm() {
+  var t = 0;
+  document.querySelectorAll('#iva-lines .iva-line').forEach(function(line) { t += Math.abs(parseFloat(line.querySelector('.iva-imp').value) || 0); });
+  return round2(t);
+}
+// Modelli rapidi: calcolati sull'imponibile inserito nelle righe IVA (sostituiscono le righe presenti).
+function applyRitPreset(key) {
+  if (!key) return;
+  var imp = totImponibileForm();
+  if (!imp) { toast('Inserisci prima l\'imponibile nelle righe IVA', 'warn'); return; }
+  var p = {
+    prof: [{ tipo: 'RT01', causale: 'A', base: imp, aliq: 20 }],
+    // la cassa previdenziale del 4% (rivalsa/contributo integrativo) è dentro l'imponibile ma non
+    // è soggetta a ritenuta: la base sono i soli onorari = imponibile / 1,04
+    prof_cassa4: [{ tipo: 'RT01', causale: 'A', base: round2(imp / 1.04), aliq: 20 }],
+    prof_cassa2: [{ tipo: 'RT01', causale: 'A', base: round2(imp / 1.02), aliq: 20 }],
+    agente: [{ tipo: 'RT01', causale: 'R', base: round2(imp * 0.5), aliq: 23 }, { tipo: 'RT04', causale: '', base: imp, aliq: ENASARCO_ALIQ_AGENTE }],
+    agente_dip: [{ tipo: 'RT01', causale: 'R', base: round2(imp * 0.2), aliq: 23 }, { tipo: 'RT04', causale: '', base: imp, aliq: ENASARCO_ALIQ_AGENTE }],
+    agente_soc: [{ tipo: 'RT04', causale: '', base: imp, aliq: ENASARCO_ALIQ_AGENTE }],
+    cond: [{ tipo: 'RT01', causale: 'A', base: imp, aliq: 4 }]
+  }[key];
+  if (!p) return;
+  setRitLines(p.map(function(r) { r.importo = round2(r.base * r.aliq / 100); return r; }));
 }
 // v2.22: confronto sul valore assoluto — per le note di credito (tot negativo) "p >= t" era sempre
 // vero, quindi una nota usata solo in parte risultava verde.
@@ -3085,8 +3234,10 @@ function openAdd(type) {
   document.getElementById('f-data').value = today();
   document.getElementById('f-scad').value = '';
   document.getElementById('f-note').value = '';
-  if (document.getElementById('f-ritenuta')) document.getElementById('f-ritenuta').value = '0';
   if (document.getElementById('f-split')) document.getElementById('f-split').checked = false;
+  if (document.getElementById('f-piva')) document.getElementById('f-piva').value = '';
+  document.querySelectorAll('#m-inv .da-verificare').forEach(function(el) { el.classList.remove('da-verificare'); });
+  setRitLines([]);
   document.getElementById('f-modpag').innerHTML = modOptions();
   document.getElementById('f-valuta').value = 'EUR';
   document.getElementById('f-pdf').value = '';
@@ -3098,11 +3249,7 @@ function openAdd(type) {
   openModal('m-inv');
 }
 
-// ======================== IMPORTA FATTURA DA PDF (fornitori esteri senza XML) ========================
-// Estrazione euristica "best effort" da testo PDF non strutturato: nessuna garanzia di
-// correttezza sui singoli campi. Serve solo a pre-compilare il form di inserimento manuale
-// (ragione sociale, numero, data, importo con aliquota 0% — tipico per fornitori esteri esenti);
-// l'utente controlla e corregge sempre prima di salvare, esattamente come un inserimento manuale.
+// ---- libreria pdf.js (caricata al primo uso)
 var _pdfJsLoaded = false;
 function loadPdfJs() {
   if (_pdfJsLoaded && window.pdfjsLib) return Promise.resolve();
@@ -3130,27 +3277,387 @@ function parseFlexibleAmount(str) {
   str = str.split(thouSep).join('').replace(decSep, '.');
   return parseFloat(str) || 0;
 }
-function extractInvoiceFieldsFromText(text) {
-  var result = { rs: '', num: '', data: '', importo: 0 };
-  var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
-  if (lines.length) result.rs = lines[0].slice(0, 80); // euristica debole: spesso l'intestazione del fornitore
+// ======================== IMPORTA FATTURA DA PDF (v2.24) ========================
+// Estrazione euristica "best effort" da PDF non strutturati (fornitori esteri senza XML): serve solo
+// a pre-compilare il form, l'utente controlla sempre prima di salvare. I campi incerti vengono
+// evidenziati in giallo.
+// v2.24: il testo non viene più letto come un unico flusso (prima tutta la pagina finiva su una sola
+// "riga" e la ragione sociale diventava l'inizio della pagina): le righe vengono ricostruite dalle
+// coordinate, separando le colonne, così etichetta e valore ("numero del documento: 26/…") stanno
+// sulla stessa riga anche quando nel PDF sono in blocchi diversi.
+function pdfContentToLines(items, pageHeight, pageNum) {
+  var pts = [];
+  items.forEach(function(it) {
+    if (!it.str || !it.str.trim()) return;
+    var t = it.transform;
+    if (Math.abs(t[1]) > 0.01 || Math.abs(t[2]) > 0.01) return; // testo ruotato (pagine orizzontali, timbri)
+    pts.push({ s: it.str, x: t[4], y: t[5], w: it.width || 0, h: Math.abs(t[3]) || it.height || 8 });
+  });
+  pts.sort(function(a, b) { return (b.y - a.y) || (a.x - b.x); });
+  var rows = [];
+  pts.forEach(function(p) {
+    var last = rows.length ? rows[rows.length - 1] : null;
+    if (last && Math.abs(last.y - p.y) <= Math.max(2, p.h * 0.3)) last.items.push(p);
+    else rows.push({ y: p.y, items: [p] });
+  });
+  var lines = [];
+  rows.forEach(function(r) {
+    r.items.sort(function(a, b) { return a.x - b.x; });
+    var cells = [], cur = null, h = 0;
+    r.items.forEach(function(p) {
+      h = Math.max(h, p.h);
+      var gap = cur ? p.x - (cur.x2) : 0;
+      if (cur && gap < Math.max(4, p.h * 0.9)) { cur.text += (gap > p.h * 0.15 ? ' ' : '') + p.s; cur.x2 = p.x + p.w; }
+      else { cur = { text: p.s, x: p.x, x2: p.x + p.w }; cells.push(cur); }
+    });
+    cells.forEach(function(c) { c.text = c.text.replace(/\s+/g, ' ').trim(); });
+    cells = cells.filter(function(c) { return c.text; });
+    var text = cells.map(function(c) { return c.text; }).join('  ');
+    if (!text || /^(c\s?o\s?p\s?y|copia|copy|duplicate|duplicato)(\s+(c\s?o\s?p\s?y|copia|copy))*$/i.test(text.replace(/\s{2,}/g, ' '))) return;
+    lines.push({ text: text, cells: cells, y: r.y, yRel: pageHeight ? 1 - r.y / pageHeight : 0.5, h: h, page: pageNum });
+  });
+  return lines;
+}
 
-  var numPattern = /(?:invoice\s*(?:no|number|#)|rechnung(?:s)?(?:nr|nummer)|facture\s*n[°o]|n[uú]mero\s*(?:de\s*)?factura|numero\s*fattura|fattura\s*n[°o.]?)\s*[:.\-]?\s*([A-Za-z0-9\-\/]+)/i;
-  var mNum = text.match(numPattern);
-  if (mNum) result.num = mNum[1];
+var PDF_MESI = { gen: 1, genn: 1, jan: 1, janv: 1, ene: 1, feb: 2, febb: 2, fev: 2, fév: 2, mar: 3, mär: 3, mrz: 3, apr: 4, avr: 4, abr: 4, mag: 5, may: 5, mai: 5, giu: 6, jun: 6, juin: 6, lug: 7, jul: 7, juil: 7, ago: 8, aug: 8, aoû: 8, aou: 8, set: 9, sep: 9, sett: 9, sept: 9, ott: 10, oct: 10, okt: 10, nov: 11, dic: 12, dec: 12, dez: 12, déc: 12, dic: 12 };
+// Prima data riconoscibile nella stringa → 'AAAA-MM-GG' ('' se nessuna). Formati: 15.09.2026,
+// 15/09/2026, 2026-09-15, 15-09-26, "15 settembre 2026", "September 15, 2026", "15-Sep-2026".
+function pdfParseDate(str) {
+  if (!str) return '';
+  var s = String(str), m;
+  function ok(y, mo, d) {
+    y = parseInt(y, 10); mo = parseInt(mo, 10); d = parseInt(d, 10);
+    if (y < 100) y += 2000;
+    if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && y >= 2000 && y <= 2100)) return '';
+    return y + '-' + pad2(mo) + '-' + pad2(d);
+  }
+  if ((m = s.match(/\b(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/))) { var r0 = ok(m[1], m[2], m[3]); if (r0) return r0; }
+  if ((m = s.match(/\b(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4}|\d{2})\b/))) {
+    var a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+    var r1 = (b > 12 && a <= 12) ? ok(m[3], a, b) : ok(m[3], b, a); // di norma GG/MM, MM/GG solo se obbligato
+    if (r1) return r1;
+  }
+  var mese = '([A-Za-zÀ-ÿ]{3,10})\\.?';
+  if ((m = s.match(new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th|°)?[\\s\\-.]+' + mese + '[\\s\\-.,]+(\\d{4})\\b')))) {
+    var mo1 = PDF_MESI[m[2].toLowerCase().slice(0, 4)] || PDF_MESI[m[2].toLowerCase().slice(0, 3)];
+    if (mo1) { var r2 = ok(m[3], mo1, m[1]); if (r2) return r2; }
+  }
+  if ((m = s.match(new RegExp('\\b' + mese + '\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b')))) {
+    var mo2 = PDF_MESI[m[1].toLowerCase().slice(0, 4)] || PDF_MESI[m[1].toLowerCase().slice(0, 3)];
+    if (mo2) { var r3 = ok(m[3], mo2, m[2]); if (r3) return r3; }
+  }
+  return '';
+}
+// Importi presenti in una stringa (formato europeo o anglosassone), escluse percentuali e numeri senza decimali.
+function pdfAmounts(str) {
+  var out = [], re = /(^|[^\d.,\/])(-?\d{1,3}(?:[.,'’ ]\d{3})+[.,]\d{2}|-?\d+[.,]\d{2})(?![\d.,\/]*\d)(?!\s*%)/g, m;
+  while ((m = re.exec(str)) !== null) {
+    var raw = m[2].replace(/['’ ]/g, '');
+    var v = parseFlexibleAmount(raw);
+    if (raw.charAt(0) === '-') v = -v;
+    out.push(v);
+  }
+  return out;
+}
 
-  var datePattern = /(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})[.\/\-](\d{1,2})[.\/\-](\d{4})/;
-  var mDate = text.match(datePattern);
-  if (mDate) {
-    if (mDate[1]) result.data = mDate[1] + '-' + pad2(mDate[2]) + '-' + pad2(mDate[3]);
-    else result.data = mDate[6] + '-' + pad2(mDate[5]) + '-' + pad2(mDate[4]); // assume GG/MM/AAAA
+var PDF_LEGAL_RE = /(^|[\s,.(+&])(s\.?\s?r\.?\s?l\.?s?|s\.?\s?p\.?\s?a\.?|s\.?n\.?c\.?|s\.?a\.?s\.?|s\.?a\.?p\.?a\.?|soc\.?\s*coop\.?|gmbh|mbh|ag|kg|co\.?\s?kg|ohg|ug|ltd\.?|limited|llc|l\.?l\.?p\.?|inc\.?|corp\.?|corporation|plc|s\.?a\.?r\.?l\.?|s\.?a\.?|s\.?l\.?u?\.?|b\.?v\.?|n\.?v\.?|oy|ab|a\/s|aps|sp\.?\s?z\s?o\.?\s?o\.?|s\.?r\.?o\.?|kft\.?|d\.?o\.?o\.?|bvba|sprl|pty)(?=$|[\s,.)+&])/i;
+var PDF_CUSTOMER_RE = /(client|cliente|customer|destinatar|spett|bill(?:ed)?\s+to|sold\s+to|ship\s+to|deliver(?:y)?\s+to|invoice\s+to|kunde|empf[aä]nger|rechnungsadresse|cessionario|committente|intestat|acquirente|buyer|factur[ée]\s+[àa]|adresse\s+de\s+facturation|dati\s+cliente|\bcl\.)/i;
+var PDF_BANK_RE = /(banca|bank|iban|swift|bic\b|conto\s+corrente|bankverbindung|kontonummer)/i;
+var PDF_VAT_LABEL_RE = /(p\.?\s?iva|partita\s+iva|vat\s*(?:no|number|id|reg)|vat\b|ust-?id|ust\.?\s*-?\s*idnr|steuernummer|tva|n°\s*tva|nif|cif|btw|codice\s+fiscale|cod\.?\s*fisc)/i;
+var PDF_VAT_RE = /\b(AT\s?U\d{8}|BE\s?0?\d{9,10}|BG\d{9,10}|CY\d{8}[A-Z]|CZ\d{8,10}|DE\s?\d{9}|DK\d{8}|EE\d{9}|EL\d{9}|ES[A-Z0-9]\d{7}[A-Z0-9]|FI\d{8}|FR[A-Z0-9]{2}\s?\d{9}|HR\d{11}|HU\d{8}|IE\d[A-Z0-9]\d{5}[A-Z]{1,2}|IT\s?\d{11}|LT\d{9,12}|LU\d{8}|LV\d{11}|MT\d{8}|NL\d{9}B\d{2}|PL\d{10}|PT\d{9}|RO\d{2,10}|SE\d{12}|SI\d{8}|SK\d{10}|GB\d{9,12}|CHE[-\s]?\d{3}\.?\d{3}\.?\d{3})\b/g;
+
+function pdfNormName(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+function pdfNameWords(s) { return meaningfulWords(pdfNormName(s)).filter(function(w) { return !PDF_LEGAL_RE.test(' ' + w + ' ') && !/^(kg|ag|co|gmbh|mbh|ltd|inc|llc|plc|bv|nv|sa|sl|sarl)$/.test(w); }); }
+function pdfSameCompany(a, b) {
+  var wa = pdfNameWords(a), wb = pdfNameWords(b);
+  if (!wa.length || !wb.length) return false;
+  var common = wa.filter(function(w) { return wb.indexOf(w) !== -1; }).length;
+  return common / Math.min(wa.length, wb.length) >= 0.6;
+}
+
+// ctx: { azienda: {rs, piva}, fornitori: [{rs, piva}] }
+function extractInvoiceFieldsFromPdfLines(lines, ctx) {
+  ctx = ctx || {};
+  var az = ctx.azienda || {};
+  var ownVat = String(az.piva || '').replace(/\s/g, '').toUpperCase();
+  var res = { rs: '', num: '', data: '', scad: '', importo: 0, imponibile: 0, iva: 0, aliq: null, ritenute: [], piva: '', certi: {}, note: [] };
+  var page1 = lines.filter(function(l) { return l.page === 1; });
+  var allText = lines.map(function(l) { return l.text; }).join('\n');
+
+  // ---- blocco indirizzo del CLIENTE (= noi): le righe sotto un'etichetta "Spett.le", "Bill to",
+  // "Rechnungsempfänger"... nella stessa colonna. Servono a non scambiare il cliente per il fornitore.
+  lines.forEach(function(l, idx) {
+    l.cells.forEach(function(cell) {
+      // solo etichette brevi ("Spett.le", "Bill to:", "Dati cliente"), non frasi che citano il cliente
+      if (!PDF_CUSTOMER_RE.test(cell.text) || cell.text.length > 45 || cell.text.split(/\s+/).length > 5) return;
+      cell.customer = true;
+      for (var k = idx + 1; k < lines.length && k <= idx + 6 && lines[k].page === l.page; k++) {
+        lines[k].cells.forEach(function(nc) { if (Math.abs(nc.x - cell.x) < 30) nc.customer = true; });
+      }
+    });
+  });
+  function lineIsCustomer(l) { return l.cells.some(function(c) { return c.customer; }); }
+  // ---- P.IVA presenti (anche italiane senza prefisso IT, se precedute da "P.IVA")
+  var vats = [];
+  function sameVat(a, b) { a = String(a).replace(/^IT/, ''); b = String(b).replace(/^IT/, ''); return !!a && a === b; }
+  lines.forEach(function(l, idx) {
+    var found = [], m, re = new RegExp(PDF_VAT_RE.source, 'g');
+    while ((m = re.exec(l.text)) !== null) found.push(m[1].replace(/[\s.\-]/g, '').toUpperCase());
+    var reIt = /(?:p\.?\s?iva|partita\s+iva|vat(?:\s*(?:no|number|reg\.?\s*no))?)\s*[:.]?\s*(\d{11})\b/gi;
+    while ((m = reIt.exec(l.text)) !== null) { if (found.indexOf('IT' + m[1]) === -1) found.push('IT' + m[1]); }
+    found.forEach(function(v) {
+      var isCustomer = (ownVat && sameVat(v, ownVat)) || PDF_CUSTOMER_RE.test(l.text) || lineIsCustomer(l);
+      vats.push({ v: v, line: l, idx: idx, customer: !!isCustomer });
+    });
+  });
+  var supplierVats = vats.filter(function(x) { return !x.customer; });
+  if (supplierVats.length) res.piva = supplierVats[0].v;
+
+  // ---- RAGIONE SOCIALE FORNITORE
+  var fornitori = (ctx.fornitori || []).filter(function(f) { return f.rs && !(az.rs && pdfSameCompany(f.rs, az.rs)); });
+  // 1) P.IVA di un fornitore già noto
+  var byVat = null;
+  if (supplierVats.length) {
+    fornitori.some(function(f) {
+      var fv = String(f.piva || '').replace(/\s/g, '').toUpperCase();
+      if (!fv) return false;
+      var hit = supplierVats.some(function(x) { return sameVat(x.v, fv); });
+      if (hit) byVat = f.rs;
+      return hit;
+    });
+  }
+  if (byVat) { res.rs = byVat; res.certi.rs = true; res.note.push('fornitore riconosciuto dalla P.IVA'); }
+  else {
+    var cands = {};
+    function addCand(name, l, idx, bonus, known, cell) {
+      name = name.replace(/\s+/g, ' ').replace(/^[\s,.;:\-–|»]+|[\s,.;:\-–|]+$/g, '')
+        .replace(/^(spett\.?\s*le|spett\.?|gent\.?\s*m[oai]|egr\.?\s*(?:sig\.?)?|messrs\.?|attn\.?:?)\s+/i, '').trim();
+      if (name.length < 3 || name.length > 80 || !/[A-Za-zÀ-ÿ]{2}/.test(name)) return;
+      var key = pdfNormName(name);
+      if (!key) return;
+      var c = cands[key] || (cands[key] = { name: name, score: 0, count: 0, known: false, minYRel: 1, page1: false, righe: {} });
+      if (c.righe[idx]) { if (bonus > 0) c.score += bonus; return; } // stessa riga già contata
+      c.righe[idx] = true;
+      c.count++;
+      if (known) { c.known = true; c.name = known; }
+      if (l.page === 1) { c.page1 = true; c.minYRel = Math.min(c.minYRel, l.yRel); }
+      c.score += bonus;
+      var prev = idx > 0 ? lines[idx - 1] : null;
+        var prevLabel = prev && prev.page === l.page && prev.text.length <= 45 && PDF_CUSTOMER_RE.test(prev.text);
+      if ((l.text.length <= 60 && PDF_CUSTOMER_RE.test(l.text)) || prevLabel || (cell ? cell.customer : lineIsCustomer(l))) c.score -= 60;
+      if (PDF_BANK_RE.test(l.text)) c.score -= 60;
+      if (az.rs && pdfSameCompany(name, az.rs)) c.score -= 1000;
+      if (ownVat && l.text.replace(/\s/g, '').toUpperCase().indexOf(ownVat.replace(/^IT/, '')) !== -1) c.score -= 200;
+    }
+    // 2) nomi di fornitori già presenti nell'archivio trovati nel testo
+    fornitori.forEach(function(f) {
+      var words = pdfNameWords(f.rs);
+      if (!words.length || (words.length === 1 && words[0].length < 4)) return;
+      lines.forEach(function(l, idx) {
+        var lt = ' ' + pdfNormName(l.text) + ' ';
+        if (words.every(function(w) { return lt.indexOf(' ' + w + ' ') !== -1; })) addCand(f.rs, l, idx, 60, f.rs);
+      });
+    });
+    // 3) righe con una forma societaria (GmbH, S.r.l., Ltd...) — il nome è il segmento fino alla virgola
+    lines.forEach(function(l, idx) {
+      l.cells.forEach(function(cell) {
+        cell.text.split(/,|\s[-–]\s|\s\|\s/).forEach(function(seg, si) {
+          if (!PDF_LEGAL_RE.test(seg)) return;
+          if (/[:@]|www\.|http/i.test(seg)) seg = seg.replace(/^.*:\s*/, '');
+          if (seg.split(/\s+/).length > 7) return; // frasi legali lunghe
+          addCand(seg, l, idx, si === 0 ? 8 : 0, null, cell);
+        });
+      });
+    });
+    // 4) intestazione: righe in alto nella prima pagina, premiando il carattere più grande — copre
+    // professionisti e agenti senza forma societaria ("Studio Dott. Mario Rossi", "Bianchi Luca")
+    var medH = page1.map(function(l) { return l.h; }).sort(function(a, b) { return a - b; })[Math.floor(page1.length / 2)] || 8;
+    page1.slice(0, 12).forEach(function(l) {
+      var idx = lines.indexOf(l);
+      l.cells.forEach(function(cell) {
+        var t = cell.text.split(/\s[-–|]\s|,/)[0];
+        if (/[:#@]|\d{3,}|www\.|http|^(fattura|invoice|rechnung|facture|factura|nota|pagina|page|copia|e-?riepilogo)\b|^(via|viale|piazza|corso|str\.|strasse|street|road)\b/i.test(t)) return;
+        if (t.split(/\s+/).length > 6) return;
+        var sizeBonus = Math.max(0, Math.min(25, (l.h / medH - 1) * 25));
+        if (sizeBonus < 3 && l.yRel > 0.12) return; // solo righe evidenziate o proprio in testa
+        addCand(t, l, idx, sizeBonus - 5, null, cell);
+      });
+    });
+    var vatLines = supplierVats.map(function(x) { return pdfNormName(x.line.text); });
+    var best = null;
+    Object.keys(cands).forEach(function(k) {
+      var c = cands[k];
+      c.score += Math.min(c.count - 1, 3) * 15;
+      if (c.page1 && c.minYRel < 0.35) c.score += 20;
+      if (c.page1 && c.minYRel < 0.2) c.score += 10;
+      if (c.known) c.score += 40;
+      var w = pdfNameWords(c.name);
+      if (w.length && vatLines.some(function(vl) { return w.some(function(x) { return x.length >= 3 && (' ' + vl + ' ').indexOf(' ' + x + ' ') !== -1; }); })) c.score += 25;
+      if (!best || c.score > best.score) best = c;
+    });
+    if (best && best.score > -100) {
+      res.rs = best.name;
+      res.certi.rs = best.known || best.score >= 40;
+      if (best.known) res.note.push('fornitore già presente in archivio');
+    }
   }
 
-  var totalPattern = /(?:grand\s*total|total\s*amount|amount\s*due|total|totale|gesamtbetrag|montant\s*total)\s*[:\s]*[€$£]?\s*([\d.,]+)/gi;
-  var match, lastAmount = null;
-  while ((match = totalPattern.exec(text)) !== null) lastAmount = match[1];
-  if (lastAmount) result.importo = parseFlexibleAmount(lastAmount);
-  return result;
+  // ---- utilità etichetta → valore (stessa riga, altrimenti stessa colonna nella riga sotto)
+  function findByLabel(labelRe, valueFn, opts) {
+    opts = opts || {};
+    var found = null;
+    for (var i = 0; i < lines.length && !found; i++) {
+      var l = lines[i];
+      if (opts.page1 && l.page !== 1) continue;
+      if (opts.exclude && opts.exclude.test(l.text)) continue;
+      for (var c = 0; c < l.cells.length && !found; c++) {
+        var cell = l.cells[c], m = cell.text.match(labelRe);
+        if (!m) continue;
+        var rest = cell.text.slice(m.index + m[0].length);
+        var v = valueFn(rest);
+        if (!v && l.cells[c + 1]) v = valueFn(l.cells[c + 1].text);
+        if (v) found = v;
+      }
+    }
+    if (found || opts.noColumn) return found;
+    for (var j = 0; j < lines.length - 1 && !found; j++) {
+      var l2 = lines[j];
+      if (opts.page1 && l2.page !== 1) continue;
+      l2.cells.forEach(function(cell) {
+        if (found || !labelRe.test(cell.text)) return;
+        var next = lines[j + 1];
+        if (next.page !== l2.page) return;
+        next.cells.forEach(function(nc) { if (!found && Math.abs(nc.x - cell.x) < 40) found = valueFn(nc.text); });
+      });
+    }
+    return found;
+  }
+
+  // ---- NUMERO DOCUMENTO
+  var NUM_LABEL = /(numero\s+(?:del\s+)?(?:documento|fattura)|n(?:r|um)?\.?\s*[°º]?\s*(?:fattura|documento|doc\.?)(?=\s|:|$)|fattura\s*(?:n(?:r|um)?\.?|numero|n°|nº)|invoice\s*(?:no\.?|number|nr\.?|#|num\.?)|inv\.?\s*(?:no\.?|#)|rechnungs?\s*-?\s*(?:nr\.?|nummer|no\.?)|facture\s*(?:n°|nº|no\.?|num[ée]ro)|n[uú]mero\s+(?:de\s+)?factura|factura\s*(?:n°|nº|no\.?|n[uú]m\.?)|document\s*(?:no\.?|number|nr\.?)|bill\s*(?:no\.?|number)|ricevuta\s*n\.?|nota\s+di\s+credito\s*n\.?|credit\s+note\s*(?:no\.?|number))\s*[:#.\-]?\s*/i;
+  function numValue(s) {
+    var m = String(s).match(/^\s*[:#.\-]?\s*((?=[A-Z0-9\-\/._]*\d)[A-Z0-9][A-Z0-9\-\/._]*)/i);
+    if (!m) return '';
+    var v = m[1].replace(/[.\-\/_]+$/, '');
+    if (pdfParseDate(v) && /^\d{1,4}[.\/\-]\d{1,2}[.\/\-]\d{2,4}$/.test(v)) return ''; // è una data, non un numero
+    return v;
+  }
+  res.num = findByLabel(NUM_LABEL, numValue) || '';
+  res.certi.num = !!res.num;
+
+  // ---- DATA DOCUMENTO e SCADENZA
+  var DATE_LABEL = /(data\s+(?:del\s+)?(?:documento|fattura|emissione)|data\s+doc\.?|invoice\s+date|date\s+of\s+(?:issue|invoice)|issue\s+date|billing\s+date|date\s+de\s+(?:la\s+)?facture|date\s+d['’]?\s*[ée]mission|rechnungsdatum|datum\s+der\s+rechnung|ausstellungsdatum|fecha\s+(?:de\s+)?(?:la\s+)?(?:factura|emisi[oó]n))\s*[:.\-]?\s*/i;
+  var DATE_LABEL_GEN = /(^|\s)(data|date|datum|fecha)\s*[:.\-]?\s*/i;
+  var DUE_RE = /(scadenza|scade|entro\s+il|due\s+date|payment\s+due|due\s+by|f[aä]llig|zahlbar\s+bis|[ée]ch[ée]ance|vencimiento|addebito|pay\s+by)/i;
+  // "Fattura n. 12/2026 del 10/09/2026": la data sulla riga del numero vale come data documento
+  var dataSuRigaNumero = '';
+  lines.some(function(l) {
+    if (!NUM_LABEL.test(l.text)) return false;
+    var m = l.text.match(/\b(?:del|dated|vom|du|de\s+fecha)\s+(.{6,25})/i);
+    if (m) dataSuRigaNumero = pdfParseDate(m[1]);
+    return !!dataSuRigaNumero;
+  });
+  res.data = dataSuRigaNumero || findByLabel(DATE_LABEL, pdfParseDate) || findByLabel(DATE_LABEL_GEN, pdfParseDate, { page1: true, exclude: DUE_RE, noColumn: true }) || '';
+  res.certi.data = !!res.data;
+  if (!res.data) {
+    page1.some(function(l) { if (DUE_RE.test(l.text)) return false; var d = pdfParseDate(l.text); if (d) res.data = d; return !!d; });
+  }
+  res.scad = findByLabel(DUE_RE, pdfParseDate, { noColumn: true }) || '';
+  if (res.scad && res.data && res.scad < res.data) res.scad = '';
+
+  // ---- RITENUTE / CONTRIBUTI indicati sul documento
+  lines.forEach(function(l) {
+    var tipo = null;
+    if (/enasarco/i.test(l.text)) tipo = 'RT04';
+    else if (/ritenuta\s+(?:d['’]?\s*acconto|irpef|alla\s+fonte)|withholding\s+tax/i.test(l.text)) tipo = 'RT01';
+    if (!tipo) return;
+    var am = pdfAmounts(l.text).map(Math.abs).filter(function(v) { return v > 0; });
+    if (!am.length) return;
+    var perc = (l.text.match(/(\d{1,2}(?:[.,]\d{1,2})?)\s*%/) || [])[1];
+    var imp = am[am.length - 1];
+    if (!res.ritenute.some(function(r) { return r.tipo === tipo && Math.abs(r.importo - imp) < 0.005; }))
+      res.ritenute.push({ tipo: tipo, causale: '', aliq: perc ? parseFlexibleAmount(perc) : 0, base: 0, importo: round2(imp) });
+  });
+  var isAgente = /enasarco|provvigion|agente\s+di\s+commercio|agenzia\s+di\s+rappresentanza/i.test(allText);
+  res.ritenute.forEach(function(r) {
+    if (r.aliq > 0) r.base = round2(r.importo / r.aliq * 100);
+    if (r.tipo === 'RT01' && isAgente) r.causale = 'R'; // ritenuta su provvigioni (F24 1038)
+    else if (r.tipo === 'RT01') r.causale = 'A';         // lavoro autonomo (F24 1040)
+  });
+  var totRit = round2(res.ritenute.reduce(function(s, r) { return s + r.importo; }, 0));
+
+  // ---- TOTALE, IMPONIBILE, IVA
+  var TOT_DOC_RE = /(totale\s+(?:documento|fattura|complessivo|generale|lordo)|importo\s+totale|grand\s+total|total\s+(?:amount|invoice|incl\.?|inc\.?\s+vat|gross)|invoice\s+total|gesamt(?:betrag|summe)|rechnungs(?:betrag|summe)|bruttobetrag|endbetrag|montant\s+(?:total|ttc)|total\s+ttc|importe\s+total|total\s+factura)/i;
+  var TOT_NET_RE = /(netto\s+(?:a|da)\s+pagare|totale\s+(?:da|a)\s+pagare|importo\s+(?:da\s+pagare|dovuto)|amount\s+(?:due|payable)|total\s+(?:due|payable|to\s+pay)|balance\s+due|zahlbetrag|zu\s+zahlen|net\s+[àa]\s+payer|montant\s+[àa]\s+payer|total\s+a\s+pagar)/i;
+  var TOT_GEN_RE = /(^|\s)(totale|total|summe|gesamt|totaal|totaux?)(\s|:|$)/i;
+  var PARTIAL_RE = /(imponibile|subtotal|sub-total|sub\s+total|zwischensumme|netto(?!\s+(?:a|da)\s+pagare)|\bnet\b|excl|ht\b|iva\b|vat\b|tax\b|mwst|ust\b|tva\b|sconto|discount|rabatt|ritenuta|enasarco|cassa|contributo|bollo)/i;
+  function amountsWhere(re, opts) {
+    opts = opts || {};
+    var out = [];
+    lines.forEach(function(l, idx) {
+      if (!re.test(l.text)) return;
+      if (opts.notRe && opts.notRe.test(l.text)) return;
+      var am = pdfAmounts(l.text).map(Math.abs);
+      if (!am.length && opts.nextLine && lines[idx + 1] && lines[idx + 1].page === l.page) am = pdfAmounts(lines[idx + 1].text).map(Math.abs);
+      out = out.concat(am.filter(function(v) { return v > 0; }));
+    });
+    return out;
+  }
+  var tDoc = amountsWhere(TOT_DOC_RE, { nextLine: true });
+  var tNet = amountsWhere(TOT_NET_RE, { nextLine: true });
+  var tGen = amountsWhere(TOT_GEN_RE, { notRe: PARTIAL_RE });
+  var max = function(a) { return a.length ? Math.max.apply(null, a) : 0; };
+  if (tDoc.length) { res.importo = max(tDoc); res.certi.importo = true; }
+  else if (tNet.length) { res.importo = round2(max(tNet) + totRit); res.certi.importo = true; if (totRit) res.note.push('totale ricostruito: netto a pagare + ritenute'); }
+  else if (tGen.length) { res.importo = max(tGen); res.certi.importo = tGen.length >= 1; }
+  else {
+    var eur = [];
+    page1.forEach(function(l) { if (/€|eur\b/i.test(l.text)) eur = eur.concat(pdfAmounts(l.text).map(Math.abs)); });
+    res.importo = max(eur);
+    res.certi.importo = false;
+  }
+  var IMP_RE = /(imponibile|subtotal|sub-total|sub\s+total|net\s+amount|total\s+(?:net|excl\.?)|totale\s+netto|nettobetrag|netto\s*betrag|zwischensumme|total\s+ht|montant\s+ht|base\s+imponible|base\s+imponibile)/i;
+  var IVA_RE = /(totale\s+iva|\biva\b|imposta|\bvat\b|\btax\b|mwst|\bust\b|\btva\b|\bigic\b)/i;
+  var impC = amountsWhere(IMP_RE, { notRe: /iva\s+\d|vat\s+\d/i });
+  var ivaC = amountsWhere(IVA_RE, { notRe: /(partita\s+iva|p\.?\s?iva|vat\s*(?:no|number|id|reg)|ust-?id|n\.?\s*iva|cod\.?\s*fisc|esente|exempt|imponibile)/i });
+  if (res.importo) {
+    var bestPair = null;
+    impC.forEach(function(a) {
+      ivaC.concat([0]).forEach(function(b) {
+        if (Math.abs(round2(a + b) - res.importo) < 0.03 && (!bestPair || b > bestPair[1])) bestPair = [a, b];
+      });
+    });
+    if (bestPair) {
+      res.imponibile = round2(bestPair[0]); res.iva = round2(bestPair[1]);
+      var aliq = res.imponibile ? res.iva / res.imponibile * 100 : 0;
+      var rates = [0, 4, 5, 10, 22, 7, 19, 20, 21, 25, 23, 24, 27, 8, 6, 9, 13, 17];
+      var snap = rates.filter(function(r) { return Math.abs(r - aliq) < 0.6; })[0];
+      res.aliq = snap !== undefined ? snap : round2(aliq);
+    }
+  }
+  if (res.aliq === null) {
+    var m0 = allText.match(/(?:iva|vat|mwst|tva)\s*\(?%?\)?\s*[:=]?\s*(0(?:[.,]00?)?)\s*%?/i);
+    if (m0 || /reverse\s+charge|inversione\s+contabile|art\.?\s*7|esente|non\s+imponibile|exempt|steuerschuldnerschaft/i.test(allText)) { res.aliq = 0; res.imponibile = res.importo; res.iva = 0; }
+  }
+  return res;
+}
+
+// Fornitori già noti (passive attive e archiviate), con P.IVA quando disponibile (import XML da v2.24).
+function fornitoriNoti() {
+  var map = {};
+  S.p.concat(((S.archive && S.archive.docs) || []).filter(function(d) { return d._originalType === 'p'; })).forEach(function(d) {
+    if (!d.rs) return;
+    var k = d.rs.toLowerCase();
+    if (!map[k]) map[k] = { rs: d.rs, piva: d.piva || '', ultimo: d };
+    else { if (!map[k].piva && d.piva) map[k].piva = d.piva; if ((d.data || '') > (map[k].ultimo.data || '')) map[k].ultimo = d; }
+  });
+  return Object.keys(map).map(function(k) { return map[k]; });
+}
+function segnaDaVerificare(id, incerto) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('da-verificare', !!incerto);
+  if (incerto) el.addEventListener('input', function togli() { el.classList.remove('da-verificare'); el.removeEventListener('input', togli); });
 }
 async function handlePdfImport(evt) {
   var file = evt.target.files[0];
@@ -3161,28 +3668,56 @@ async function handlePdfImport(evt) {
     await loadPdfJs();
     var arrayBuffer = await file.arrayBuffer();
     var pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    var text = '';
-    var maxPages = Math.min(pdf.numPages, 2);
+    var lines = [];
+    var maxPages = Math.min(pdf.numPages, 3);
     for (var p = 1; p <= maxPages; p++) {
       var page = await pdf.getPage(p);
       var content = await page.getTextContent();
-      text += content.items.map(function(it) { return it.str; }).join(' ') + '\n';
+      var vp = page.getViewport({ scale: 1 });
+      lines = lines.concat(pdfContentToLines(content.items, vp.height, p));
     }
-    var extracted = extractInvoiceFieldsFromText(text);
+    if (!lines.length) throw new Error('il PDF non contiene testo selezionabile (probabilmente è una scansione)');
+    var fornitori = fornitoriNoti();
+    var x = extractInvoiceFieldsFromPdfLines(lines, { azienda: S.azienda || {}, fornitori: fornitori });
+    console.debug('Import PDF — righe lette:', lines.map(function(l) { return l.page + ' | ' + l.text; }));
+    console.debug('Import PDF — campi estratti:', x);
     openAdd('p');
-    if (extracted.rs) document.getElementById('f-rs').value = extracted.rs;
-    if (extracted.num) document.getElementById('f-num').value = extracted.num;
-    if (extracted.data) document.getElementById('f-data').value = extracted.data;
-    document.getElementById('f-note').value = 'Importato da PDF (fornitore estero) — verificare tutti i dati prima di salvare.';
+    if (x.rs) document.getElementById('f-rs').value = x.rs;
+    if (x.num) document.getElementById('f-num').value = x.num;
+    if (x.data) document.getElementById('f-data').value = x.data;
+    if (x.scad) document.getElementById('f-scad').value = x.scad;
+    if (document.getElementById('f-piva')) document.getElementById('f-piva').value = x.piva || '';
+    // Fornitore già noto: ripropone il metodo di pagamento dell'ultima fattura
+    var noto = fornitori.filter(function(f) { return f.rs === x.rs; })[0];
+    if (noto && noto.ultimo && noto.ultimo.modpag) document.getElementById('f-modpag').value = noto.ultimo.modpag;
     var ivaContainer = document.getElementById('iva-lines');
     if (ivaContainer) ivaContainer.innerHTML = '';
-    addIvaLine(0, extracted.importo || 0, 0);
-    if (typeof updateIvaTotals === 'function') updateIvaTotals();
+    if (x.aliq !== null && x.imponibile) addIvaLine(x.aliq, x.imponibile, x.iva);
+    else addIvaLine(0, x.importo || 0, 0);
+    setRitLines(x.ritenute || []);
+    updateIvaTotals();
+    segnaDaVerificare('f-rs', !x.rs || !x.certi.rs);
+    segnaDaVerificare('f-num', !x.num);
+    segnaDaVerificare('f-data', !x.data || !x.certi.data);
+    var impEl = document.querySelector('#iva-lines .iva-imp');
+    if (impEl && (!x.importo || !x.certi.importo || x.aliq === null)) { impEl.classList.add('da-verificare'); impEl.addEventListener('input', function() { impEl.classList.remove('da-verificare'); }, { once: true }); }
+    var note = ['Importato da PDF — verificare i dati prima di salvare'];
+    if (x.note.length) note.push(x.note.join('; '));
+    if (x.aliq === null) note.push('IVA non riconosciuta: impostata al 0% sul totale');
+    if (x.piva) note.push('P.IVA fornitore: ' + x.piva);
+    document.getElementById('f-note').value = note.join(' — ');
     // Allega subito il PDF selezionato, come se l'avessi scelto tu dal campo file del form.
     var dt = new DataTransfer();
     dt.items.add(file);
     document.getElementById('f-pdf').files = dt.files;
-    toast('📎 Dati estratti dal PDF — controlla ragione sociale, numero, data e importo prima di salvare', 'info');
+    var dup = x.num && S.p.some(function(d) { return d.num === x.num && pdfSameCompany(d.rs, x.rs); });
+    if (dup) toast('⚠️ Esiste già una fattura passiva di questo fornitore con numero ' + x.num, 'warn');
+    var mancanti = [];
+    if (!x.rs) mancanti.push('ragione sociale');
+    if (!x.num) mancanti.push('numero');
+    if (!x.data) mancanti.push('data');
+    if (!x.importo) mancanti.push('importo');
+    toast(mancanti.length ? '📎 PDF letto — non trovati: ' + mancanti.join(', ') + '. I campi in giallo vanno controllati.' : '📎 Dati estratti dal PDF — controlla i campi evidenziati prima di salvare', mancanti.length ? 'warn' : 'info');
   } catch (e) {
     console.error('handlePdfImport:', e);
     toast('❌ Lettura PDF fallita: ' + e.message + ' — puoi comunque inserire la fattura a mano con "➕ Aggiungi"', 'error');
@@ -3200,8 +3735,10 @@ function editInv(id, type) {
   document.getElementById('f-data').value = inv.data || '';
   document.getElementById('f-scad').value = inv.scad || '';
   document.getElementById('f-note').value = inv.note || '';
-  if (document.getElementById('f-ritenuta')) document.getElementById('f-ritenuta').value = ritenutaDoc(inv).toFixed(2);
   if (document.getElementById('f-split')) document.getElementById('f-split').checked = ivaSplitDoc(inv) > 0;
+  if (document.getElementById('f-piva')) document.getElementById('f-piva').value = inv.piva || '';
+  document.querySelectorAll('#m-inv .da-verificare').forEach(function(el) { el.classList.remove('da-verificare'); });
+  setRitLines(ritenuteDoc(inv).map(function(r) { return Object.assign({}, r); }));
   document.getElementById('f-modpag').innerHTML = modOptions(inv.modpag);
   document.getElementById('f-valuta').value = inv.valuta || 'EUR';
   var ivaContainer = document.getElementById('iva-lines');
@@ -3252,7 +3789,8 @@ async function saveInv() {
   var tot = round2(imponibile + totiva);
   var oldInvEdit = editId ? S[curType].find(function(i) { return i.id === editId; }) : null;
   // v2.23: ritenuta e split payment
-  var ritenuta = round2(Math.abs(parseFloat((document.getElementById('f-ritenuta') || { value: 0 }).value) || 0));
+  var ritenute = readRitLines(); // v2.24: più righe (ritenuta d'acconto, ENASARCO, INPS...)
+  var ritenuta = round2(ritenute.reduce(function(s, r) { return s + r.importo; }, 0));
   var splitChk = !!(document.getElementById('f-split') && document.getElementById('f-split').checked);
   var ivaSplit = 0;
   if (splitChk) {
@@ -3260,7 +3798,7 @@ async function saveInv() {
     ivaSplit = (oldInvEdit && ivaSplitDoc(oldInvEdit) > 0 && Math.abs(round2(Math.abs(oldInvEdit.totiva || 0) - Math.abs(totiva))) < 0.005)
       ? ivaSplitDoc(oldInvEdit) : round2(Math.abs(totiva));
   }
-  if (ritenuta + ivaSplit > Math.abs(tot) + 0.005) { toast('⚠️ Ritenuta + IVA split superano il totale del documento', 'warn'); return; }
+  if (ritenuta + ivaSplit > Math.abs(tot) + 0.005) { toast('⚠️ Ritenute/contributi + IVA split superano il totale del documento', 'warn'); return; }
   var nettoNuovo = round2(Math.abs(tot) - ritenuta - ivaSplit);
   // v2.22: il netto da pagare non può scendere sotto quanto già pagato/compensato
   if (oldInvEdit && (oldInvEdit.pagato || 0) > nettoNuovo + 0.005) {
@@ -3280,7 +3818,9 @@ async function saveInv() {
     tot: tot,
     righeIva: righeIva,
     ritenuta: ritenuta,
+    ritenute: ritenute,
     ivaSplit: ivaSplit,
+    piva: ((document.getElementById('f-piva') || {}).value || (oldInvEdit && oldInvEdit.piva) || '').toUpperCase(),
     aliq: righeIva.map(function(r) { return r.aliq; }).join(', ') + '%',
     pagamenti: editId ? (S[curType].find(function(i) { return i.id === editId; }) || {}).pagamenti || [] : [],
     pagato: editId ? (S[curType].find(function(i) { return i.id === editId; }) || {}).pagato || 0 : 0,
@@ -3375,7 +3915,7 @@ function openPayments(id, type) {
   var payDiv = document.getElementById('pay-body');
   var payInfo = document.getElementById('pay-info');
   var extraInfo = '';
-  if (ritenutaDoc(inv) > 0) extraInfo += ' - Ritenuta € ' + fmt(ritenutaDoc(inv));
+  ritenuteDoc(inv).forEach(function(r) { extraInfo += ' - ' + ritTipoBreve(r) + ' € ' + fmt(r.importo); });
   if (ivaSplitDoc(inv) > 0) extraInfo += ' - IVA split € ' + fmt(ivaSplitDoc(inv));
   if (extraInfo) extraInfo += ' - Netto € ' + fmt(nettoDaPagare(inv));
   payInfo.textContent = (type === 'a' ? 'Attiva' : 'Passiva') + ' - ' + inv.rs + ' - Totale € ' + fmt(inv.tot) + extraInfo + ' - Residuo € ' + fmt(residuo(inv));
@@ -3558,9 +4098,9 @@ function clearAll() {
 function exportCSV(type) {
   var data = S[type];
   if (!data.length) { toast('Nessuna fattura da esportare', 'warn'); return; }
-  var headers = ['Ragione Sociale', 'Numero', 'Data', 'Scadenza', 'Imponibile', 'IVA %', 'Tot. IVA', 'Totale', 'Ritenuta', 'IVA split payment', 'Netto da pagare', 'Pagato', 'Residuo', 'Note'];
+  var headers = ['Ragione Sociale', 'Numero', 'Data', 'Scadenza', 'Imponibile', 'IVA %', 'Tot. IVA', 'Totale', 'Ritenute/contributi', 'Dettaglio ritenute', 'IVA split payment', 'Netto da pagare', 'Pagato', 'Residuo', 'Note'];
   var rows = data.map(function(i) {
-    return [i.rs, i.num, i.data, i.scad || '', i.imp, i.aliq, i.totiva, i.tot, ritenutaDoc(i), ivaSplitDoc(i), nettoDaPagare(i), i.pagato || 0, residuo(i), i.note || ''];
+    return [i.rs, i.num, i.data, i.scad || '', i.imp, i.aliq, i.totiva, i.tot, ritenutaDoc(i), ritenuteDoc(i).map(function(r) { return ritTipoBreve(r) + (r.aliq ? ' ' + r.aliq + '%' : '') + ' ' + fmt(r.importo); }).join('; '), ivaSplitDoc(i), nettoDaPagare(i), i.pagato || 0, residuo(i), i.note || ''];
   });
   var csv = [headers].concat(rows).map(function(row) {
     return row.map(function(cell) { return '"' + String(cell).replace(/"/g, '""') + '"'; }).join(',');
@@ -3638,33 +4178,76 @@ function buildReportIVA(dal, al) {
     splitVendite: splitVendite, splitAcquisti: splitAcquisti,
     saldo: round2(totIvaVendite - splitVendite - totIvaAcquisti) };
 }
-// v2.23: riepilogo ritenute d'acconto nel periodo.
-// - Attive: ritenute SUBITE (le versa il cliente; per te sono un credito d'imposta) — per data documento.
-// - Passive: ritenute OPERATE da te sui compensi pagati (professionisti ecc.), da versare con F24
-//   (tipicamente codice tributo 1040) entro il 16 del mese successivo al PAGAMENTO — per data
-//   dell'ultimo pagamento registrato. Le fatture non ancora pagate sono elencate a parte.
+// v2.24: riepilogo ritenute e contributi trattenuti nel periodo, calcolato PER PAGAMENTO.
+// - Passive (sei tu il sostituto d'imposta): per ogni pagamento registrato si calcola la quota di
+//   ritenuta proporzionale (importo pagato / netto da pagare); l'ultimo pagamento che salda la
+//   fattura prende il resto, così la somma torna al centesimo. Scadenze:
+//     · ritenute IRPEF (RT01/RT02) e INPS (RT03): F24 entro il 16 del mese successivo al pagamento
+//       — codice tributo 1040 (lavoro autonomo) o 1038 (provvigioni agenti, causale Q/R)
+//     · ENASARCO (RT04): versamento trimestrale entro il 20 del secondo mese dopo il trimestre
+//       (20/05, 20/08, 20/11, 20/02); la quota a carico ditta è indicata come stima
+// - Attive (le subisci): per data documento, sono un credito d'imposta.
 function scadenzaF24(dataPag) {
   if (!dataPag) return '';
   var d = new Date(dataPag + 'T00:00:00');
   if (isNaN(d.getTime())) return '';
   return isoLocal(new Date(d.getFullYear(), d.getMonth() + 1, 16));
 }
+function scadenzaEnasarco(dataPag) {
+  if (!dataPag) return '';
+  var y = parseInt(dataPag.slice(0, 4), 10), m = parseInt(dataPag.slice(5, 7), 10);
+  if (!y || !m) return '';
+  var q = Math.floor((m - 1) / 3);
+  return q === 3 ? (y + 1) + '-02-20' : y + '-' + ['05', '08', '11'][q] + '-20';
+}
+function scadenzaRitenuta(r, dataPag) {
+  if (r.tipo === 'RT04') return scadenzaEnasarco(dataPag);
+  if (r.tipo === 'RT01' || r.tipo === 'RT02' || r.tipo === 'RT03') return scadenzaF24(dataPag);
+  return '';
+}
 function buildRitenute(dal, al) {
   function inRange(data) { return data && (!dal || data >= dal) && (!al || data <= al); }
-  var attive = S.a.filter(function(d) { return ritenutaDoc(d) > 0 && d.tipo !== 'proforma' && inRange(d.data); })
-    .map(function(d) { return { doc: d, ritenuta: ritenutaDoc(d) * ((d.tot || 0) < 0 ? -1 : 1) }; });
-  var passive = [], passiveNonPagate = [];
+  var passive = [], nonPagate = [], attive = [];
   S.p.forEach(function(d) {
-    if (!(ritenutaDoc(d) > 0) || d.tipo === 'proforma') return;
-    var pags = (d.pagamenti || []).filter(function(p) { return p.data; }).sort(function(a, b) { return a.data.localeCompare(b.data); });
-    var ultimo = pags.length ? pags[pags.length - 1].data : '';
+    var rits = ritenuteDoc(d);
+    if (!rits.length || d.tipo === 'proforma') return;
     var segno = (d.tot || 0) < 0 ? -1 : 1;
-    if (!ultimo) { if (inRange(d.data)) passiveNonPagate.push({ doc: d, ritenuta: ritenutaDoc(d) * segno }); return; }
-    if (inRange(ultimo)) passive.push({ doc: d, ritenuta: ritenutaDoc(d) * segno, dataPag: ultimo, scadF24: scadenzaF24(ultimo), parziale: residuo(d) > 0 });
+    var netto = nettoDaPagare(d);
+    var pags = (d.pagamenti || []).filter(function(p) { return p.data && p.importo > 0; }).sort(function(a, b) { return a.data.localeCompare(b.data); });
+    if (!pags.length || !netto) {
+      if (inRange(d.data)) rits.forEach(function(r) { nonPagate.push({ doc: d, r: r, importo: round2(segno * Math.abs(r.importo)) }); });
+      return;
+    }
+    var saldata = residuo(d) <= 0.005, giaAttribuito = {};
+    pags.forEach(function(p, k) {
+      var ultimo = saldata && k === pags.length - 1;
+      rits.forEach(function(r, ri) {
+        var tot = Math.abs(parseFloat(r.importo) || 0);
+        var quota = ultimo ? round2(tot - (giaAttribuito[ri] || 0)) : round2(tot * Math.min(1, p.importo / netto));
+        giaAttribuito[ri] = round2((giaAttribuito[ri] || 0) + quota);
+        if (!quota || !inRange(p.data)) return;
+        passive.push({ doc: d, r: r, dataPag: p.data, importo: round2(segno * quota), rata: pags.length > 1 || !saldata, scad: scadenzaRitenuta(r, p.data), codice: codiceTributoRit(r) });
+      });
+    });
   });
-  passive.sort(function(a, b) { return a.dataPag.localeCompare(b.dataPag); });
-  var sum = function(arr) { return round2(arr.reduce(function(s, r) { return s + r.ritenuta; }, 0)); };
-  return { attive: attive, passive: passive, passiveNonPagate: passiveNonPagate, totAttive: sum(attive), totPassive: sum(passive), totNonPagate: sum(passiveNonPagate) };
+  S.a.forEach(function(d) {
+    if (d.tipo === 'proforma' || !inRange(d.data)) return;
+    var segno = (d.tot || 0) < 0 ? -1 : 1;
+    ritenuteDoc(d).forEach(function(r) { attive.push({ doc: d, r: r, importo: round2(segno * Math.abs(r.importo)) }); });
+  });
+  passive.sort(function(a, b) { return (a.scad || '9').localeCompare(b.scad || '9') || a.dataPag.localeCompare(b.dataPag); });
+  function sum(arr, filt) { return round2(arr.filter(filt || function() { return true; }).reduce(function(s, x) { return s + x.importo; }, 0)); }
+  var irpef = function(x) { return x.r.tipo === 'RT01' || x.r.tipo === 'RT02'; };
+  return {
+    passive: passive, nonPagate: nonPagate, attive: attive,
+    tot1040: sum(passive, function(x) { return irpef(x) && x.codice === '1040'; }),
+    tot1038: sum(passive, function(x) { return irpef(x) && x.codice === '1038'; }),
+    totIrpef: sum(passive, irpef),
+    totEnasarco: sum(passive, function(x) { return x.r.tipo === 'RT04'; }),
+    totAltri: sum(passive, function(x) { return !irpef(x) && x.r.tipo !== 'RT04'; }),
+    totNonPagate: sum(nonPagate),
+    totAttive: sum(attive)
+  };
 }
 function renderReportIVA() {
   var dal = document.getElementById('riva-dal').value;
@@ -3705,38 +4288,48 @@ function renderRitenute(dal, al) {
   if (!box) return;
   var r = buildRitenute(dal, al);
   _lastRitenute = r;
-  if (!r.attive.length && !r.passive.length && !r.passiveNonPagate.length) {
-    box.innerHTML = '<p style="color:#a8a29e;font-size:.85rem">Nessuna ritenuta d\'acconto nel periodo.</p>';
+  if (!r.passive.length && !r.nonPagate.length && !r.attive.length) {
+    box.innerHTML = '<p style="color:#a8a29e;font-size:.85rem">Nessuna ritenuta o contributo trattenuto nel periodo.</p>';
     return;
   }
   var td = 'style="padding:.4rem;border:1px solid #e5e3dc"', tdn = 'style="padding:.4rem;border:1px solid #e5e3dc;text-align:right"';
   function dt(d) { return d ? d.split('-').reverse().join('/') : '—'; }
-  var html = '<div class="rec-section-lbl" style="margin-top:0">🧾 Ritenute d\'acconto nel periodo</div>';
-  html += '<div style="display:flex;gap:1rem;flex-wrap:wrap;font-size:.9rem;margin-bottom:.6rem">' +
-    '<div><strong>Subite (attive, a credito):</strong> € ' + fmt(r.totAttive) + ' <span style="color:#78716c">(' + r.attive.length + ' doc.)</span></div>' +
-    '<div><strong>Da versare con F24 (passive pagate):</strong> € ' + fmt(r.totPassive) + ' <span style="color:#78716c">(' + r.passive.length + ' doc.)</span></div>' +
-    (r.passiveNonPagate.length ? '<div><strong>Su passive non ancora pagate:</strong> € ' + fmt(r.totNonPagate) + '</div>' : '') + '</div>';
+  function card(titolo, valore, sotto) {
+    return '<div style="flex:1 1 200px;background:#f9f8f5;border:1px solid #e5e3dc;border-radius:8px;padding:.5rem .7rem">' +
+      '<div style="font-size:.7rem;text-transform:uppercase;color:#78716c">' + titolo + '</div>' +
+      '<div style="font-size:1.05rem;font-weight:700">€ ' + fmt(valore) + '</div>' + (sotto ? '<div style="font-size:.72rem;color:#57534e">' + sotto + '</div>' : '') + '</div>';
+  }
+  var html = '<div class="rec-section-lbl" style="margin-top:0">🧾 Ritenute e contributi trattenuti nel periodo</div><div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem">';
+  if (r.totIrpef) html += card('Ritenute IRPEF da versare (F24)', r.totIrpef, (r.tot1040 ? 'cod. 1040: € ' + fmt(r.tot1040) : '') + (r.tot1040 && r.tot1038 ? ' · ' : '') + (r.tot1038 ? 'cod. 1038: € ' + fmt(r.tot1038) : ''));
+  if (r.totEnasarco) html += card('ENASARCO quota agente trattenuta', r.totEnasarco, '+ quota ditta stimata € ' + fmt(r.totEnasarco) + ' · totale da versare € ' + fmt(round2(r.totEnasarco * 2)));
+  if (r.totAltri) html += card('Altri contributi trattenuti', r.totAltri, '');
+  if (r.totAttive) html += card('Ritenute subite (fatture attive)', r.totAttive, 'a credito in dichiarazione');
+  if (r.totNonPagate) html += card('Su passive non ancora pagate', r.totNonPagate, 'da versare dopo il pagamento');
+  html += '</div>';
   if (r.passive.length) {
-    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem;margin-bottom:.6rem"><thead><tr style="background:#f5f4f0"><th ' + td + '>Fornitore</th><th ' + td + '>N.</th><th ' + td + '>Pagata il</th><th ' + tdn + '>Ritenuta</th><th ' + td + '>Scadenza F24</th></tr></thead><tbody>' +
+    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem;margin-bottom:.6rem"><thead><tr style="background:#f5f4f0">' +
+      '<th ' + td + '>Fornitore</th><th ' + td + '>N.</th><th ' + td + '>Pagata il</th><th ' + td + '>Tipo</th><th ' + tdn + '>Importo</th><th ' + td + '>Versare entro</th><th ' + td + '>Cod.</th></tr></thead><tbody>' +
       r.passive.map(function(x) {
-        return '<tr><td ' + td + '>' + esc(x.doc.rs) + '</td><td ' + td + '>' + esc(x.doc.num) + '</td><td ' + td + '>' + dt(x.dataPag) + (x.parziale ? ' <span style="color:#b45309">(parziale)</span>' : '') + '</td><td ' + tdn + '>€ ' + fmt(x.ritenuta) + '</td><td ' + td + '>' + dt(x.scadF24) + '</td></tr>';
+        return '<tr><td ' + td + '>' + esc(x.doc.rs) + '</td><td ' + td + '>' + esc(x.doc.num) + '</td><td ' + td + '>' + dt(x.dataPag) + (x.rata ? ' <span style="color:#b45309" title="Quota proporzionale al pagamento">(rata)</span>' : '') + '</td>' +
+          '<td ' + td + '>' + esc(ritTipoBreve(x.r)) + '</td><td ' + tdn + '>€ ' + fmt(x.importo) + '</td><td ' + td + '>' + dt(x.scad) + '</td><td ' + td + '>' + esc(x.codice || '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
   if (r.attive.length) {
-    html += '<details style="font-size:.8rem;margin-bottom:.4rem"><summary style="cursor:pointer">Dettaglio ritenute subite sulle fatture attive</summary><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:.4rem"><thead><tr style="background:#f5f4f0"><th ' + td + '>Cliente</th><th ' + td + '>N.</th><th ' + td + '>Data</th><th ' + tdn + '>Ritenuta</th></tr></thead><tbody>' +
-      r.attive.map(function(x) { return '<tr><td ' + td + '>' + esc(x.doc.rs) + '</td><td ' + td + '>' + esc(x.doc.num) + '</td><td ' + td + '>' + dt(x.doc.data) + '</td><td ' + tdn + '>€ ' + fmt(x.ritenuta) + '</td></tr>'; }).join('') +
+    html += '<details style="font-size:.8rem;margin-bottom:.4rem"><summary style="cursor:pointer">Dettaglio ritenute subite sulle fatture attive</summary><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:.4rem"><thead><tr style="background:#f5f4f0"><th ' + td + '>Cliente</th><th ' + td + '>N.</th><th ' + td + '>Data</th><th ' + td + '>Tipo</th><th ' + tdn + '>Importo</th></tr></thead><tbody>' +
+      r.attive.map(function(x) { return '<tr><td ' + td + '>' + esc(x.doc.rs) + '</td><td ' + td + '>' + esc(x.doc.num) + '</td><td ' + td + '>' + dt(x.doc.data) + '</td><td ' + td + '>' + esc(ritTipoBreve(x.r)) + '</td><td ' + tdn + '>€ ' + fmt(x.importo) + '</td></tr>'; }).join('') +
       '</tbody></table></div></details>';
   }
-  html += '<p style="font-size:.72rem;color:#78716c">⚠️ Indicativo: la scadenza F24 è il 16 del mese successivo all\'ultimo pagamento registrato. Se una fattura è pagata in più rate, la ritenuta va versata in proporzione a ogni rata — verifica con il commercialista.</p>';
+  html += '<p style="font-size:.72rem;color:#78716c">⚠️ Indicativo. Per i pagamenti a rate la ritenuta è ripartita in proporzione a ogni pagamento. ENASARCO: quota ditta stimata pari alla quota agente; non sono considerati massimali e minimali annui — verifica con il commercialista o il portale ENASARCO.</p>';
   box.innerHTML = html;
 }
 function exportRitenuteCSV() {
-  if (!_lastRitenute || (!_lastRitenute.attive.length && !_lastRitenute.passive.length && !_lastRitenute.passiveNonPagate.length)) { toast('Nessuna ritenuta nel periodo', 'warn'); return; }
-  var rows = [['Tipo', 'Ragione Sociale', 'Numero', 'Data documento', 'Data pagamento', 'Ritenuta', 'Scadenza F24']];
-  _lastRitenute.passive.forEach(function(x) { rows.push(['Passiva - da versare', x.doc.rs, x.doc.num, x.doc.data, x.dataPag, x.ritenuta, x.scadF24]); });
-  _lastRitenute.passiveNonPagate.forEach(function(x) { rows.push(['Passiva - non pagata', x.doc.rs, x.doc.num, x.doc.data, '', x.ritenuta, '']); });
-  _lastRitenute.attive.forEach(function(x) { rows.push(['Attiva - subita', x.doc.rs, x.doc.num, x.doc.data, '', x.ritenuta, '']); });
-  var csv = rows.map(function(row) { return row.map(function(cell) { return '"' + String(cell).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
+  var r = _lastRitenute;
+  if (!r || (!r.passive.length && !r.nonPagate.length && !r.attive.length)) { toast('Nessuna ritenuta nel periodo', 'warn'); return; }
+  var rows = [['Tipo', 'Ragione Sociale', 'Numero', 'Data documento', 'Data pagamento', 'Ritenuta/contributo', 'Importo', 'Versare entro', 'Codice tributo']];
+  r.passive.forEach(function(x) { rows.push(['Passiva - da versare', x.doc.rs, x.doc.num, x.doc.data, x.dataPag, ritTipoBreve(x.r), x.importo, x.scad, x.codice]); });
+  r.nonPagate.forEach(function(x) { rows.push(['Passiva - non pagata', x.doc.rs, x.doc.num, x.doc.data, '', ritTipoBreve(x.r), x.importo, '', codiceTributoRit(x.r)]); });
+  r.attive.forEach(function(x) { rows.push(['Attiva - subita', x.doc.rs, x.doc.num, x.doc.data, '', ritTipoBreve(x.r), x.importo, '', '']); });
+  var csv = rows.map(function(row) { return row.map(function(cell) { return '"' + String(cell == null ? '' : cell).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
   var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   var link = document.createElement('a');
   var url = URL.createObjectURL(blob);
@@ -4156,19 +4749,12 @@ function updateIvaTotals() {
   // v2.23: netto effettivamente da incassare/pagare
   var nettoEl = document.getElementById('ft-netto');
   if (nettoEl) {
-    var rit = Math.abs(parseFloat((document.getElementById('f-ritenuta') || { value: 0 }).value) || 0);
+    var rit = readRitLines().reduce(function(s, r) { return s + r.importo; }, 0);
     var split = document.getElementById('f-split') && document.getElementById('f-split').checked ? Math.abs(totIva) : 0;
     nettoEl.textContent = '€ ' + fmt(Math.abs(totImp + totIva) - rit - split);
     var wrap = document.getElementById('ft-netto-wrap');
     if (wrap) wrap.style.display = (rit > 0 || split > 0) ? '' : 'none';
   }
-}
-// v2.23: scorciatoia — ritenuta come percentuale dell'imponibile (20% professionisti, 4% condomini...)
-function setRitenutaPerc(perc) {
-  var totImp = 0;
-  document.querySelectorAll('#iva-lines .iva-line').forEach(function(line) { totImp += Math.abs(parseFloat(line.querySelector('.iva-imp').value) || 0); });
-  document.getElementById('f-ritenuta').value = round2(totImp * perc / 100).toFixed(2);
-  updateIvaTotals();
 }
 function toggleRemovePdf(btn) {
   var isRemove = btn.getAttribute('data-remove') === '1';
@@ -4190,8 +4776,24 @@ function acUpdate() {
 function acHide() { setTimeout(function() { document.getElementById('ac-list').classList.remove('open'); }, 200); }
 
 
+// ======================== LA MIA AZIENDA (v2.24) ========================
+// Ragione sociale e P.IVA propria: servono all'import da PDF per non scambiare il cliente (noi) per
+// il fornitore. Si compilano da sole al primo import XML; qui si possono impostare o correggere.
+function configuraAzienda() {
+  var az = S.azienda || {};
+  var rs = prompt('Ragione sociale della tua azienda (serve a riconoscerla nei PDF dei fornitori):', az.rs || '');
+  if (rs === null) return;
+  var piva = prompt('Partita IVA della tua azienda (es. IT01234567890):', az.piva || '');
+  if (piva === null) return;
+  piva = piva.replace(/\s/g, '').toUpperCase();
+  if (/^\d{11}$/.test(piva)) piva = 'IT' + piva;
+  S.azienda = { rs: rs.trim(), piva: piva };
+  save();
+  toast('🏢 Dati azienda salvati' + (rs.trim() ? ': ' + rs.trim() : ''), 'success');
+}
+
 // ======================== STORAGE ========================
-var APP_VERSION = '2.23.0';
+var APP_VERSION = '2.24.0';
 var DATA_FILE = 'data.json';
 var ALLEGATI = 'allegati';
 var HAS_DIR = 'showDirectoryPicker' in window;
@@ -4260,7 +4862,8 @@ function stateToJSON() {
     a: S.a.map(function(i) { var c = Object.assign({}, i); delete c.pdf; return c; }),
     p: S.p.map(function(i) { var c = Object.assign({}, i); delete c.pdf; return c; }),
     suppliers: S.suppliers, customMods: S.customMods || [], movimenti: S.movimenti || [],
-    cassa: S.cassa, banche: S.banche, archive: S.archive, regoleChiusura: S.regoleChiusura || []
+    cassa: S.cassa, banche: S.banche, archive: S.archive, regoleChiusura: S.regoleChiusura || [],
+    azienda: S.azienda || null
   }, null, 2);
 }
 function applyJSON(d) {
@@ -4274,6 +4877,7 @@ function applyJSON(d) {
   S.banche = d.banche || [];
   S.archive = d.archive || { docs: [], movimenti: [] };
   S.regoleChiusura = d.regoleChiusura || [];
+  S.azienda = d.azienda || null;
   if (!S.cassa.movimenti) S.cassa.movimenti = [];
   _selectedArchiveDocsA.clear();
   _selectedArchiveDocsP.clear();

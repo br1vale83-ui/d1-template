@@ -59,11 +59,53 @@ npx wrangler dev --test-scheduled
 curl "http://localhost:8787/__scheduled?cron=30+21+*+*+*"
 ```
 
-## Pubblicazione
+## Pubblicazione su Cloudflare
 
 ```bash
 npm run deploy       # applica le migrazioni al D1 remoto e pubblica il Worker
 ```
+
+## Installazione su un server in ufficio (Ubuntu)
+
+In alternativa a Cloudflare, lo stesso codice gira su un server proprio con Node.js e un database SQLite su file. I controlli serali e un backup giornaliero vengono eseguiti dal servizio stesso.
+
+Requisito: **Node.js 22.13 o successivo**. Si verifica con `node -v`; se manca:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+sudo apt-get install -y nodejs
+```
+
+Installazione, e anche aggiornamento, dalla cartella del repository:
+
+```bash
+git clone https://github.com/br1vale83-ui/d1-template.git registro-presenze
+cd registro-presenze
+git checkout claude/sistema-presenze
+sudo ./deploy/installa.sh
+```
+
+Lo script crea l'utente di sistema `presenze` e installa il programma in `/opt/registro-presenze`. I dati vanno in `/var/lib/registro-presenze`, la configurazione in `/etc/registro-presenze.env`. Il servizio systemd `registro-presenze` parte all'avvio. Poi si apre `http://<ip-del-server>:8787/` e si crea l'amministratore.
+
+| Cosa | Dove / comando |
+|---|---|
+| Database | `/var/lib/registro-presenze/presenze.db` |
+| Backup giornalieri (ultimi 30) | `/var/lib/registro-presenze/backup/` |
+| Configurazione (porta, ora dei controlli) | `/etc/registro-presenze.env`, poi `sudo systemctl restart registro-presenze` |
+| Log | `journalctl -u registro-presenze -f` |
+| Aggiornare | `git pull && sudo ./deploy/installa.sh` |
+
+**HTTPS.** In rete locale il servizio funziona anche in HTTP. Se deve essere raggiungibile da fuori ufficio, ad esempio per timbrare dallo smartphone, va messo dietro un reverse proxy con HTTPS. Con Caddy basta un `Caddyfile` come:
+
+```
+presenze.tuodominio.it {
+	reverse_proxy 127.0.0.1:8787
+}
+```
+
+In quel caso imposta `INDIRIZZO=127.0.0.1` e `PROXY_HTTPS=1` in `/etc/registro-presenze.env`.
+
+Per provarlo senza installarlo: `npm run build:server && npm run start:server`. I dati finiscono in `./dati`.
 
 ## API principali
 

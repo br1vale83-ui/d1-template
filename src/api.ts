@@ -136,7 +136,7 @@ const setup: Handler = async ({ req, env }) => {
 		.run();
 	const id = r.meta.last_row_id;
 	await registra(env.DB, id, "setup", { matricola: b.matricola });
-	return json({ ok: true }, 201, { "set-cookie": await creaSessione(env.DB, id) });
+	return json({ ok: true }, 201, { "set-cookie": await creaSessione(env.DB, req, id) });
 };
 
 const login: Handler = async ({ req, env }) => {
@@ -163,7 +163,7 @@ const login: Handler = async ({ req, env }) => {
 		throw new HttpError(401, "Matricola o PIN errati");
 	}
 	await env.DB.prepare("UPDATE dipendenti SET tentativi_falliti = 0, bloccato_fino = NULL WHERE id = ?").bind(d.id).run();
-	return json({ ok: true }, 200, { "set-cookie": await creaSessione(env.DB, d.id) });
+	return json({ ok: true }, 200, { "set-cookie": await creaSessione(env.DB, req, d.id) });
 };
 
 const logout: Handler = async ({ req, env }) => json({ ok: true }, 200, { "set-cookie": await chiudiSessione(env.DB, req) });

@@ -57,20 +57,26 @@ async function sha256(s: string): Promise<string> {
 	return hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
 }
 
-export async function creaSessione(db: D1Database, dipendenteId: number): Promise<string> {
+/** Il flag Secure va messo solo su HTTPS: su HTTP in rete locale il browser scarterebbe il cookie. */
+function attributiCookie(req: Request): string {
+	const sicura = new URL(req.url).protocol === "https:";
+	return `Path=/; HttpOnly; SameSite=Strict${sicura ? "; Secure" : ""}`;
+}
+
+export async function creaSessione(db: D1Database, req: Request, dipendenteId: number): Promise<string> {
 	const token = hex(crypto.getRandomValues(new Uint8Array(32)));
 	const scadenza = new Date(Date.now() + DURATA_SESSIONE_ORE * 3600_000).toISOString();
 	await db
 		.prepare("INSERT INTO sessioni (token_hash, dipendente_id, scadenza) VALUES (?, ?, ?)")
 		.bind(await sha256(token), dipendenteId, scadenza)
 		.run();
-	return `${COOKIE_SESSIONE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${DURATA_SESSIONE_ORE * 3600}`;
+	return `${COOKIE_SESSIONE}=${token}; ${attributiCookie(req)}; Max-Age=${DURATA_SESSIONE_ORE * 3600}`;
 }
 
 export async function chiudiSessione(db: D1Database, req: Request): Promise<string> {
 	const token = leggiCookie(req, COOKIE_SESSIONE);
 	if (token) await db.prepare("DELETE FROM sessioni WHERE token_hash = ?").bind(await sha256(token)).run();
-	return `${COOKIE_SESSIONE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
+	return `${COOKIE_SESSIONE}=; ${attributiCookie(req)}; Max-Age=0`;
 }
 
 export async function utenteCorrente(db: D1Database, req: Request): Promise<Utente | null> {

@@ -1,0 +1,23 @@
+[Unit]
+Description=Registro presenze
+After=network.target
+
+[Service]
+Type=simple
+User=presenze
+Group=presenze
+WorkingDirectory=/opt/registro-presenze
+EnvironmentFile=/etc/registro-presenze.env
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning /opt/registro-presenze/dist/server.mjs
+Restart=on-failure
+RestartSec=5
+
+# Isolamento: il servizio può scrivere solo nella cartella dei dati.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/registro-presenze
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Presenze</title>
+<style>
+:root {
+	--bg: #f5f6f8; --card: #fff; --txt: #1d2330; --muted: #677085; --line: #e2e5eb;
+	--pri: #2457c5; --pri-txt: #fff; --ok: #1f8a4c; --warn: #b26b00; --err: #c0392b;
+	--ferie: #2e86de; --malattia: #e67e22; --infortunio: #c0392b; --permesso: #8e44ad; --presente: #27ae60; --assente: #c0392b;
+	--radius: 10px; color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+	:root { --bg: #12151c; --card: #1b2029; --txt: #e7eaf0; --muted: #98a1b3; --line: #2c3340; --pri: #5b8cff; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--txt); }
+header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 17px; margin: 0; flex: 1; }
+nav { display: flex; gap: 4px; padding: 8px 16px; overflow-x: auto; background: var(--card); border-bottom: 1px solid var(--line); }
+nav button { background: none; border: 0; padding: 8px 12px; border-radius: 8px; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
+nav button.attivo { background: color-mix(in srgb, var(--pri) 14%, transparent); color: var(--pri); font-weight: 600; }
+main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.card h2 { font-size: 16px; margin: 0 0 12px; }
+.griglia { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.kpi { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.kpi b { display: block; font-size: 22px; }
+.kpi span { color: var(--muted); font-size: 13px; }
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+input, select, textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--txt); font: inherit; }
+.form { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; }
+.form .largo { grid-column: 1 / -1; }
+button.btn { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--pri); background: var(--pri); color: var(--pri-txt); font: inherit; font-weight: 600; cursor: pointer; }
+button.sec { background: transparent; color: var(--pri); }
+button.pic { padding: 4px 9px; font-size: 13px; font-weight: 500; }
+button.rosso { border-color: var(--err); background: var(--err); }
+button:disabled { opacity: .5; cursor: default; }
+.timbra { text-align: center; padding: 28px 16px; }
+.orologio { font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.grande { font-size: 20px; padding: 18px 40px; border-radius: 14px; margin-top: 16px; min-width: 240px; }
+.tabella { width: 100%; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; color: #fff; background: var(--muted); }
+.b-ferie { background: var(--ferie); } .b-malattia { background: var(--malattia); } .b-infortunio { background: var(--infortunio); }
+.b-permesso { background: var(--permesso); } .b-presente { background: var(--presente); } .b-assente { background: var(--assente); }
+.b-in_attesa { background: var(--warn); } .b-approvata, .b-registrata { background: var(--ok); } .b-rifiutata, .b-annullata { background: var(--muted); }
+.b-in_corso { background: var(--pri); }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal .intest { font-size: 12px; color: var(--muted); text-align: center; }
+.cal .g { min-height: 64px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; font-size: 12px; }
+.cal .g.nl { background: color-mix(in srgb, var(--muted) 10%, transparent); }
+.cal .g .n { font-weight: 700; }
+.cal .g .s { display: block; margin-top: 2px; }
+.muted { color: var(--muted); }
+.riga { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.avviso { padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 15%, transparent); margin-bottom: 12px; }
+#toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 10px 16px; border-radius: 8px; background: var(--txt); color: var(--bg); display: none; max-width: 90vw; z-index: 9; }
+#toast.err { background: var(--err); color: #fff; }
+.accesso { max-width: 380px; margin: 8vh auto; }
+.nascosto { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const ETICHETTE = {
+	ferie: "Ferie", permesso: "Permesso", malattia: "Malattia", infortunio: "Infortunio", presente: "Presente", assente: "Assente",
+	in_corso: "In corso", futuro: "", non_lavorativo: "", festivo: "Festivo", chiusura: "Chiusura",
+	in_attesa: "In attesa", approvata: "Approvata", rifiutata: "Rifiutata", registrata: "Registrata", annullata: "Annullata",
+	assenza_non_giustificata: "Assenza non giustificata", uscita_mancante: "Uscita mancante",
+	certificato_mancante: "Protocollo certificato mancante", denuncia_inail_mancante: "Denuncia INAIL mancante",
+};
+const badge = (s) => (ETICHETTE[s] ? `<span class="badge b-${esc(s)}">${esc(ETICHETTE[s])}</span>` : "");
+const fmtData = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" }) : "");
+const fmtOre = (min) => `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}m`;
+let stato = { utente: null, oggi: null, vista: "timbra" };
+
+function toast(msg, errore = false) {
+	const t = $("#toast");
+	t.textContent = msg;
+	t.className = errore ? "err" : "";
+	t.style.display = "block";
+	clearTimeout(toast.t);
+	toast.t = setTimeout(() => (t.style.display = "none"), 3500);
+}
+
+async function api(metodo, percorso, corpo) {
+	const r = await fetch(percorso, {
+		method: metodo,
+		headers: corpo ? { "content-type": "application/json" } : {},
+		body: corpo ? JSON.stringify(corpo) : undefined,
+	});
+	const dati = await r.json().catch(() => ({}));
+	if (r.status === 401 && percorso !== "/api/login") { stato.utente = null; avvia(); }
+	if (!r.ok) throw new Error(dati.errore || `Errore ${r.status}`);
+	return dati;
+}
+
+function datiForm(form) {
+	const o = {};
+	for (const [k, v] of new FormData(form)) if (v !== "") o[k] = v;
+	return o;
+}
+
+async function invia(form, fn) {
+	const b = form.querySelector("button[type=submit]");
+	if (b) b.disabled = true;
+	try { await fn(datiForm(form)); } catch (e) { toast(e.message, true); } finally { if (b) b.disabled = false; }
+}
+
+// ------------------------------------------------------------ accesso
+
+async function avvia() {
+	const s = await api("GET", "/api/stato");
+	stato.utente = s.utente;
+	stato.oggi = s.oggi;
+	if (!s.configurato) return vistaSetup();
+	if (!s.utente) return vistaLogin();
+	vistaApp();
+}
+
+function vistaSetup() {
+	$("#app").innerHTML = `<div class="accesso card"><h2>Configurazione iniziale</h2>
+	<p class="muted">Crea l'account amministratore dell'ufficio del personale.</p>
+	<form class="form" id="f"><div class="largo"><label>Matricola</label><input name="matricola" required></div>
+	<div><label>Nome</label><input name="nome" required></div><div><label>Cognome</label><input name="cognome" required></div>
+	<div class="largo"><label>PIN (4-12 cifre)</label><input name="pin" type="password" inputmode="numeric" pattern="\\d{4,12}" required></div>
+	<div class="largo"><button class="btn" type="submit">Crea amministratore</button></div></form></div>`;
+	$("#f").onsubmit = (e) => { e.preventDefault(); invia(e.target, async (d) => { await api("POST", "/api/setup", d); avvia(); }); };
+}
+
+function vistaLogin() {
+	$("#app").innerHTML = `<div class="accesso card"><h2>Registro presenze</h2>
+	<form class="form" id="f"><div class="largo"><label>Matricola</label><input name="matricola" autocomplete="username" required autofocus></div>
+	<div class="largo"><label>PIN</label><input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required></div>
+	<div class="largo"><button class="btn" type="submit">Accedi</button></div></form></div>`;
+	$("#f").onsubmit = (e) => { e.preventDefault(); invia(e.target, async (d) => { await api("POST", "/api/login", d); avvia(); }); };
+}
+
+// ------------------------------------------------------------ shell
+
+const VISTE = {
+	timbra: ["Timbra", vistaTimbra],
+	calendario: ["Calendario", vistaCalendario],
+	assenze: ["Assenze e ferie", vistaAssenze],
+	oggi: ["Presenze oggi", vistaOggi, true],
+	richieste: ["Richieste", vistaRichieste, true],
+	anomalie: ["Anomalie", vistaAnomalie],
+	report: ["Report mensile", vistaReport, true],
+	dipendenti: ["Dipendenti", vistaDipendenti, true],
+	impostazioni: ["Impostazioni", vistaImpostazioni],
+};
+
+function vistaApp() {
+	const u = stato.utente;
+	const admin = u.ruolo === "admin";
+	$("#app").innerHTML = `<header><h1>Registro presenze</h1><span class="muted">${esc(u.nome)} ${esc(u.cognome)}${admin ? " · amministratore" : ""}</span>
+	<button class="btn sec pic" id="esci">Esci</button></header>
+	<nav>${Object.entries(VISTE).filter(([, v]) => admin || !v[2]).map(([k, v]) => `<button data-v="${k}">${v[0]}</button>`).join("")}</nav>
+	<main id="m"></main>`;
+	$("#esci").onclick = async () => { await api("POST", "/api/logout"); stato.utente = null; avvia(); };
+	document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => mostra(b.dataset.v)));
+	mostra(VISTE[stato.vista] && (admin || !VISTE[stato.vista][2]) ? stato.vista : "timbra");
+}
+
+async function mostra(v) {
+	stato.vista = v;
+	clearInterval(mostra.timer);
+	document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("attivo", b.dataset.v === v));
+	const m = $("#m");
+	m.innerHTML = `<p class="muted">Caricamento…</p>`;
+	try { await VISTE[v][1](m); } catch (e) { m.innerHTML = `<div class="card">${esc(e.message)}</div>`; }
+}
+
+function selettoreDipendente(id, dipendenti, sel) {
+	return `<select id="${id}">${dipendenti.filter((d) => d.attivo).map((d) =>
+		`<option value="${d.id}" ${d.id === sel ? "selected" : ""}>${esc(d.cognome)} ${esc(d.nome)} (${esc(d.matricola)})</option>`).join("")}</select>`;
+}
+
+// ------------------------------------------------------------ timbratura
+
+async function vistaTimbra(m) {
+	const cal = await api("GET", `/api/calendario?mese=${stato.oggi.data.slice(0, 7)}`);
+	const g = cal.giorni.find((x) => x.data === stato.oggi.data);
+	const dentro = g.timbratura_aperta;
+	m.innerHTML = `<div class="card timbra">
+		<div class="muted">${new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
+		<div class="orologio" id="ora"></div>
+		<div>${dentro ? "Sei <b>in servizio</b>" : "Sei <b>fuori servizio</b>"} · oggi ${fmtOre(g.minuti_lavorati)} ${badge(["ferie","malattia","infortunio"].includes(g.stato) ? g.stato : "")}</div>
+		<button class="btn grande ${dentro ? "rosso" : ""}" id="tb">${dentro ? "Registra USCITA" : "Registra ENTRATA"}</button>
+		<p class="muted">${g.timbrature.map((t) => `${t.tipo === "entrata" ? "▶" : "■"} ${esc(t.ora)}${t.fonte === "admin" ? "*" : ""}`).join(" &nbsp; ") || "Nessuna timbratura oggi"}</p>
+	</div>
+	<div class="card"><h2>Ferie ${cal.saldo_ferie.anno}</h2>${kpiFerie(cal.saldo_ferie)}</div>`;
+	const tick = () => { const o = $("#ora"); if (o) o.textContent = new Date().toLocaleTimeString("it-IT"); };
+	tick();
+	mostra.timer = setInterval(tick, 1000);
+	$("#tb").onclick = async (e) => {
+		e.target.disabled = true;
+		try { const r = await api("POST", "/api/timbra"); toast(`${r.tipo === "entrata" ? "Entrata" : "Uscita"} registrata alle ${r.ora}`); mostra("timbra"); }
+		catch (err) { toast(err.message, true); e.target.disabled = false; }
+	};
+}
+
+function kpiFerie(s) {
+	return `<div class="griglia">
+	<div class="kpi"><b>${s.spettanti}</b><span>Spettanti</span></div>
+	<div class="kpi"><b>${s.godute}</b><span>Godute</span></div>
+	<div class="kpi"><b>${s.pianificate}</b><span>Approvate future</span></div>
+	<div class="kpi"><b>${s.in_attesa}</b><span>In attesa</span></div>
+	<div class="kpi"><b>${s.residuo}</b><span>Residue</span></div></div>`;
+}
+
+// ------------------------------------------------------------ calendario
+
+async function vistaCalendario(m) {
+	const admin = stato.utente.ruolo === "admin";
+	const dip = admin ? await api("GET", "/api/dipendenti") : [];
+	stato.calMese ??= stato.oggi.data.slice(0, 7);
+	stato.calDip ??= stato.utente.id;
+	m.innerHTML = `<div class="card"><div class="form">
+		<div><label>Mese</label><input type="month" id="mese" value="${stato.calMese}"></div>
+		${admin ? `<div><label>Dipendente</label>${selettoreDipendente("dip", dip, stato.calDip)}</div>` : ""}
+	</div></div><div id="cal"></div>`;
+	const carica = async () => {
+		stato.calMese = $("#mese").value || stato.oggi.data.slice(0, 7);
+		if (admin) stato.calDip = Number($("#dip").value);
+		const c = await api("GET", `/api/calendario?mese=${stato.calMese}&dipendente_id=${stato.calDip}`);
+		const primo = (new Date(c.giorni[0].data + "T00:00:00").getDay() + 6) % 7;
+		const r = c.riepilogo;
+		$("#cal").innerHTML = `<div class="card"><h2>${esc(c.dipendente.cognome)} ${esc(c.dipendente.nome)} · ${new Date(c.mese + "-01T00:00:00").toLocaleDateString("it-IT", { month: "long", year: "numeric" })}</h2>
+		<div class="griglia" style="margin-bottom:16px">
+			<div class="kpi"><b>${r.ore_lavorate}</b><span>Ore lavorate</span></div>
+			<div class="kpi"><b>${r.giorni_presenza}/${r.giorni_lavorativi}</b><span>Presenze / lavorativi</span></div>
+			<div class="kpi"><b>${r.giorni_ferie}</b><span>Ferie</span></div>
+			<div class="kpi"><b>${r.giorni_malattia}</b><span>Malattia</span></div>
+			<div class="kpi"><b>${r.giorni_infortunio}</b><span>Infortunio</span></div>
+			<div class="kpi"><b>${r.ore_permesso}</b><span>Ore permesso</span></div>
+			<div class="kpi"><b>${r.giorni_assenza_ingiustificata}</b><span>Assenze ingiustificate</span></div>
+		</div>
+		<div class="cal">${["Lun","Mar","Mer","Gio","Ven","Sab","Dom"].map((x) => `<div class="intest">${x}</div>`).join("")}
+		${"<div></div>".repeat(primo)}
+		${c.giorni.map((g) => `<div class="g ${g.lavorativo ? "" : "nl"}" title="${esc(g.festivita || "")}">
+			<span class="n">${Number(g.data.slice(8))}</span> ${badge(g.stato)}
+			${g.minuti_lavorati ? `<span class="s">${fmtOre(g.minuti_lavorati)}</span>` : ""}
+			${g.ore_permesso ? `<span class="s muted">perm. ${g.ore_permesso}h</span>` : ""}
+			${g.festivita ? `<span class="s muted">${esc(g.festivita)}</span>` : ""}
+		</div>`).join("")}</div></div>
+		${admin ? await pannelloTimbrature(c) : ""}`;
+		if (admin) collegaPannelloTimbrature();
+	};
+	$("#mese").onchange = carica;
+	if (admin) $("#dip").onchange = carica;
+	await carica();
+}
+
+async function pannelloTimbrature(c) {
+	const t = await api("GET", `/api/timbrature?mese=${c.mese}&dipendente_id=${c.dipendente.id}`);
+	return `<div class="card"><h2>Correzione timbrature</h2>
+	<form class="form" id="ft"><div><label>Data</label><input type="date" name="data" required></div>
+	<div><label>Ora</label><input type="time" name="ora" required></div>
+	<div><label>Tipo</label><select name="tipo"><option value="entrata">Entrata</option><option value="uscita">Uscita</option></select></div>
+	<div class="largo"><label>Motivazione (obbligatoria, resta nel registro)</label><input name="note" required maxlength="300"></div>
+	<div><button class="btn" type="submit">Aggiungi timbratura</button></div></form>
+	<div class="tabella" style="margin-top:12px"><table><tr><th>Data</th><th>Ora</th><th>Tipo</th><th>Origine</th><th>Note</th><th></th></tr>
+	${t.map((x) => `<tr><td>${fmtData(x.data)}</td><td>${esc(x.ora)}</td><td>${esc(x.tipo)}</td><td>${x.fonte === "admin" ? "manuale" : "dipendente"}</td><td>${esc(x.note)}</td>
+	<td><button class="btn sec pic" data-del="${x.id}">Elimina</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">Nessuna timbratura</td></tr>`}
+	</table></div></div>`;
+}
+
+function collegaPannelloTimbrature() {
+	$("#ft").onsubmit = (e) => { e.preventDefault(); invia(e.target, async (d) => {
+		await api("POST", "/api/timbrature", { ...d, dipendente_id: stato.calDip }); toast("Timbratura aggiunta"); mostra("calendario"); }); };
+	document.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
+		if (!confirm("Eliminare la timbratura? L'operazione resta nel registro modifiche.")) return;
+		try { await api("DELETE", `/api/timbrature/${b.dataset.del}`); mostra("calendario"); } catch (e) { toast(e.message, true); }
+	}));
+}
+
+// ------------------------------------------------------------ assenze
+
+async function vistaAssenze(m) {
+	const admin = stato.utente.ruolo === "admin";
+	const [assenze, saldo, dip] = await Promise.all([
+		api("GET", "/api/assenze"), api("GET", "/api/saldo-ferie"), admin ? api("GET", "/api/dipendenti") : [],
+	]);
+	m.innerHTML = `<div class="card"><h2>Nuova richiesta o comunicazione</h2>
+	<form class="form" id="fa">
+		${admin ? `<div class="largo"><label>Dipendente</label>${selettoreDipendente("dipA", dip, stato.utente.id).replace('id="dipA"', 'id="dipA" name="dipendente_id"')}</div>` : ""}
+		<div><label>Tipo</label><select name="tipo" id="tipo">
+			<option value="ferie">Ferie</option><option value="permesso">Permesso (ore)</option>
+			<option value="malattia">Malattia</option><option value="infortunio">Infortunio</option></select></div>
+		<div><label>Dal</label><input type="date" name="data_inizio" required></div>
+		<div data-per="ferie malattia infortunio"><label>Al</label><input type="date" name="data_fine"></div>
+		<div data-per="permesso"><label>Ore</label><input type="number" name="ore" min="0.5" step="0.5" max="12"></div>
+		<div data-per="malattia"><label>N. protocollo certificato INPS</label><input name="protocollo_certificato" maxlength="50"></div>
+		${admin ? `<div data-per="infortunio"><label>N. denuncia INAIL</label><input name="numero_denuncia_inail" maxlength="50"></div>` : ""}
+		<div class="largo" data-per="infortunio permesso ferie"><label id="lDescr">Note</label><textarea name="descrizione" rows="2" maxlength="1000"></textarea></div>
+		<div class="largo avviso" data-per="malattia">Indica solo il numero di protocollo del certificato: <b>non inserire la diagnosi</b>, che il datore di lavoro non deve conoscere.</div>
+		<div class="largo avviso" data-per="infortunio">Avvisa subito il responsabile. L'ufficio del personale deve inoltrare la denuncia all'INAIL entro 2 giorni dal ricevimento del certificato medico.</div>
+		<div class="largo"><button class="btn" type="submit">Invia</button></div>
+	</form></div>
+	<div class="card"><h2>Ferie ${saldo.anno}</h2>${kpiFerie(saldo)}</div>
+	<div class="card"><h2>Le mie assenze</h2>${tabellaAssenze(assenze, false)}</div>`;
+	const aggiornaCampi = () => {
+		const t = $("#tipo").value;
+		document.querySelectorAll("[data-per]").forEach((el) => el.classList.toggle("nascosto", !el.dataset.per.split(" ").includes(t)));
+		$("#lDescr").textContent = t === "infortunio" ? "Descrizione dell'accaduto (luogo, dinamica) *" : "Note";
+	};
+	$("#tipo").onchange = aggiornaCampi;
+	aggiornaCampi();
+	$("#fa").onsubmit = (e) => { e.preventDefault(); invia(e.target, async (d) => {
+		for (const el of document.querySelectorAll("[data-per].nascosto")) {
+			const campo = el.querySelector("[name]"); if (campo) delete d[campo.name];
+		}
+		const r = await api("POST", "/api/assenze", d);
+		toast(r.stato === "in_attesa" ? "Richiesta inviata: in attesa di approvazione" : "Assenza registrata");
+		mostra("assenze");
+	}); };
+	collegaAzioniAssenze();
+}
+
+function tabellaAssenze(lista, conNome) {
+	if (!lista.length) return `<p class="muted">Nessuna assenza.</p>`;
+	const admin = stato.utente.ruolo === "admin";
+	return `<div class="tabella"><table><tr>${conNome ? "<th>Dipendente</th>" : ""}<th>Tipo</th><th>Periodo</th><th>Stato</th><th>Dettagli</th><th></th></tr>
+	${lista.map((a) => `<tr>${conNome ? `<td>${esc(a.cognome)} ${esc(a.nome)}</td>` : ""}
+		<td>${badge(a.tipo)}</td>
+		<td>${fmtData(a.data_inizio)}${a.data_fine !== a.data_inizio ? " → " + fmtData(a.data_fine) : ""}${a.ore ? ` · ${a.ore}h` : ""}</td>
+		<td>${badge(a.stato)}</td>
+		<td class="muted">${a.tipo === "malattia" ? `Protocollo: ${esc(a.protocollo_certificato) || "<b>mancante</b>"}` : ""}
+			${a.tipo === "infortunio" ? `Denuncia INAIL: ${esc(a.numero_denuncia_inail) || "<b>da inoltrare</b>"}<br>` : ""}${esc(a.descrizione)}</td>
+		<td class="riga">
+			${a.stato === "in_attesa" && admin ? `<button class="btn pic" data-az="approva" data-id="${a.id}">Approva</button><button class="btn sec pic" data-az="rifiuta" data-id="${a.id}">Rifiuta</button>` : ""}
+			${a.tipo === "malattia" && a.stato === "registrata" ? `<button class="btn sec pic" data-az="protocollo" data-id="${a.id}">Protocollo</button>` : ""}
+			${a.tipo === "infortunio" && a.stato === "registrata" && admin ? `<button class="btn sec pic" data-az="inail" data-id="${a.id}">Denuncia INAIL</button>` : ""}
+			${["malattia","infortunio"].includes(a.tipo) && a.stato === "registrata" ? `<button class="btn sec pic" data-az="prolunga" data-id="${a.id}" data-fine="${a.data_fine}">Prolunga</button>` : ""}
+			${(a.stato === "in_attesa" || (admin && ["approvata","registrata"].includes(a.stato))) ? `<button class="btn sec pic" data-az="annulla" data-id="${a.id}">Annulla</button>` : ""}
+		</td></tr>`).join("")}</table></div>`;
+}
+
+function collegaAzioniAssenze() {
+	document.querySelectorAll("[data-az]").forEach((b) => (b.onclick = async () => {
+		const id = b.dataset.id;
+		try {
+			switch (b.dataset.az) {
+				case "approva": {
+					try { await api("POST", `/api/assenze/${id}/approva`, {}); }
+					catch (e) { if (!/insufficiente/.test(e.message) || !confirm(e.message + "\nApprovare comunque?")) throw e; await api("POST", `/api/assenze/${id}/approva`, { forza: true }); }
+					break;
+				}
+				case "rifiuta": { const motivo = prompt("Motivo del rifiuto (facoltativo)"); if (motivo === null) return; await api("POST", `/api/assenze/${id}/rifiuta`, { motivo }); break; }
+				case "annulla": if (!confirm("Annullare questa assenza?")) return; await api("POST", `/api/assenze/${id}/annulla`); break;
+				case "protocollo": { const v = prompt("Numero di protocollo del certificato medico"); if (!v) return; await api("PATCH", `/api/assenze/${id}`, { protocollo_certificato: v }); break; }
+				case "inail": { const v = prompt("Numero/protocollo della denuncia INAIL"); if (!v) return; await api("PATCH", `/api/assenze/${id}`, { numero_denuncia_inail: v }); break; }
+				case "prolunga": { const v = prompt("Nuova data di fine (AAAA-MM-GG)", b.dataset.fine); if (!v) return; await api("PATCH", `/api/assenze/${id}`, { data_fine: v }); break; }
+			}
+			toast("Operazione completata");
+			mostra(stato.vista);
+		} catch (e) { toast(e.message, true); }
+	}));
+}
+
+// ------------------------------------------------------------ amministrazione
+
+async function vistaOggi(m) {
+	const lista = await api("GET", "/api/presenze-oggi");
+	const conta = (f) => lista.filter(f).length;
+	m.innerHTML = `<div class="card"><h2>Situazione di oggi · ${fmtData(stato.oggi.data)}</h2>
+	<div class="griglia" style="margin-bottom:16px">
+		<div class="kpi"><b>${conta((d) => d.in_sede)}</b><span>In servizio ora</span></div>
+		<div class="kpi"><b>${conta((d) => d.stato === "ferie")}</b><span>In ferie</span></div>
+		<div class="kpi"><b>${conta((d) => d.stato === "malattia")}</b><span>In malattia</span></div>
+		<div class="kpi"><b>${conta((d) => d.stato === "infortunio")}</b><span>Infortunio</span></div>
+		<div class="kpi"><b>${conta((d) => d.stato === "in_corso" && !d.timbrature.length)}</b><span>Non ancora timbrato</span></div>
+	</div>
+	<div class="tabella"><table><tr><th>Dipendente</th><th>Stato</th><th>Timbrature</th><th>Ore</th></tr>
+	${lista.map((d) => `<tr><td>${esc(d.cognome)} ${esc(d.nome)} <span class="muted">${esc(d.matricola)}</span></td>
+		<td>${d.in_sede ? '<span class="badge b-presente">In servizio</span>' : d.stato === "in_corso" && !d.timbrature.length ? '<span class="badge">Non timbrato</span>' : badge(d.stato) || '<span class="badge">Uscito</span>'}</td>
+		<td>${d.timbrature.map((t) => `${t.tipo === "entrata" ? "▶" : "■"} ${esc(t.ora)}`).join(" ")}</td><td>${fmtOre(d.minuti_lavorati)}</td></tr>`).join("")}
+	</table></div></div>`;
+}
+
+async function vistaRichieste(m) {
+	const [attesa, tutte] = await Promise.all([api("GET", "/api/assenze?tutti=1&stato=in_attesa"), api("GET", "/api/assenze?tutti=1")]);
+	const giustificativi = tutte.filter((a) => ["malattia", "infortunio"].includes(a.tipo) && a.stato === "registrata");
+	m.innerHTML = `<div class="card"><h2>Da approvare (${attesa.length})</h2>${tabellaAssenze(attesa, true)}</div>
+	<div class="card"><h2>Malattie e infortuni registrati</h2>${tabellaAssenze(giustificativi, true)}</div>
+	<div class="card"><h2>Storico</h2>${tabellaAssenze(tutte.filter((a) => !["in_attesa"].includes(a.stato) && !giustificativi.includes(a)).slice(0, 100), true)}</div>`;
+	collegaAzioniAssenze();
+}
+
+async function vistaAnomalie(m) {
+	const admin = stato.utente.ruolo === "admin";
+	const lista = await api("GET", "/api/anomalie");
+	m.innerHTML = `<div class="card"><h2>Anomalie aperte (${lista.length})</h2>
+	<p class="muted">Rilevate automaticamente ogni sera: giornate lavorative senza timbrature né giustificativi, uscite non timbrate, certificati e denunce INAIL mancanti.</p>
+	${lista.length ? `<div class="tabella"><table><tr><th>Data</th><th>Dipendente</th><th>Tipo</th><th>Note</th>${admin ? "<th></th>" : ""}</tr>
+	${lista.map((a) => `<tr><td>${fmtData(a.data)}</td><td>${esc(a.cognome)} ${esc(a.nome)}</td><td>${esc(ETICHETTE[a.tipo] || a.tipo)}</td><td class="muted">${esc(a.note)}</td>
+	${admin ? `<td><button class="btn sec pic" data-ris="${a.id}">Segna risolta</button></td>` : ""}</tr>`).join("")}</table></div>` : `<p>Nessuna anomalia aperta. 👍</p>`}
+	${!admin && lista.length ? `<p class="muted">Per sistemare una giornata registra l'assenza nella sezione "Assenze e ferie" o contatta l'ufficio del personale.</p>` : ""}</div>`;
+	document.querySelectorAll("[data-ris]").forEach((b) => (b.onclick = async () => {
+		const note = prompt("Nota di chiusura (facoltativa)"); if (note === null) return;
+		try { await api("POST", `/api/anomalie/${b.dataset.ris}/risolvi`, { note }); mostra("anomalie"); } catch (e) { toast(e.message, true); }
+	}));
+}
+
+async function vistaReport(m) {
+	stato.repMese ??= stato.oggi.data.slice(0, 7);
+	m.innerHTML = `<div class="card"><div class="form"><div><label>Mese</label><input type="month" id="rm" value="${stato.repMese}"></div>
+	<div><a id="csv"><button class="btn sec" type="button">Scarica CSV (Excel)</button></a></div></div></div><div id="rep"></div>`;
+	const carica = async () => {
+		stato.repMese = $("#rm").value || stato.repMese;
+		$("#csv").href = `/api/report.csv?mese=${stato.repMese}`;
+		const r = await api("GET", `/api/report?mese=${stato.repMese}`);
+		$("#rep").innerHTML = `<div class="card tabella"><table><tr><th>Matricola</th><th>Dipendente</th><th>Presenze</th><th>Ore</th><th>Ferie</th><th>Malattia</th><th>Infortunio</th><th>Permessi (h)</th><th>Ingiustificate</th><th>Ferie residue</th></tr>
+		${r.righe.map((x) => `<tr><td>${esc(x.matricola)}</td><td>${esc(x.cognome)} ${esc(x.nome)}</td><td>${x.giorni_presenza}/${x.giorni_lavorativi}</td><td>${x.ore_lavorate}</td>
+		<td>${x.giorni_ferie}</td><td>${x.giorni_malattia}</td><td>${x.giorni_infortunio}</td><td>${x.ore_permesso}</td><td>${x.giorni_assenza_ingiustificata}</td><td>${x.ferie_residue}</td></tr>`).join("")}</table></div>`;
+	};
+	$("#rm").onchange = carica;
+	await carica();
+}
+
+async function vistaDipendenti(m) {
+	const lista = await api("GET", "/api/dipendenti");
+	m.innerHTML = `<div class="card"><h2>Nuovo dipendente</h2><form class="form" id="fd">
+		<div><label>Matricola</label><input name="matricola" required></div><div><label>Nome</label><input name="nome" required></div>
+		<div><label>Cognome</label><input name="cognome" required></div><div><label>Email</label><input name="email" type="email"></div>
+		<div><label>PIN iniziale</label><input name="pin" inputmode="numeric" pattern="\\d{4,12}" required></div>
+		<div><label>Ore giornaliere</label><input name="ore_giornaliere" type="number" step="0.5" value="8"></div>
+		<div><label>Giorni ferie annui</label><input name="giorni_ferie_annui" type="number" value="26"></div>
+		<div><label>Data assunzione</label><input name="data_assunzione" type="date"></div>
+		<div><label>Ruolo</label><select name="ruolo"><option value="dipendente">Dipendente</option><option value="admin">Amministratore</option></select></div>
+		<div><button class="btn" type="submit">Aggiungi</button></div></form></div>
+	<div class="card tabella"><table><tr><th>Matricola</th><th>Nome</th><th>Ruolo</th><th>Assunto il</th><th>Ore/g</th><th>Ferie/anno</th><th>Stato</th><th></th></tr>
+	${lista.map((d) => `<tr><td>${esc(d.matricola)}</td><td>${esc(d.cognome)} ${esc(d.nome)}<br><span class="muted">${esc(d.email)}</span></td><td>${esc(d.ruolo)}</td>
+		<td>${fmtData(d.data_assunzione)}</td><td>${d.ore_giornaliere}</td><td>${d.giorni_ferie_annui}</td><td>${d.attivo ? "Attivo" : '<span class="muted">Cessato</span>'}</td>
+		<td class="riga"><button class="btn sec pic" data-mod="${d.id}" data-ferie="${d.giorni_ferie_annui}" data-ore="${d.ore_giornaliere}">Modifica</button>
+		<button class="btn sec pic" data-pin="${d.id}">Reset PIN</button>
+		<button class="btn sec pic" data-att="${d.id}" data-v="${d.attivo ? 0 : 1}">${d.attivo ? "Disattiva" : "Riattiva"}</button></td></tr>`).join("")}</table></div>`;
+	$("#fd").onsubmit = (e) => { e.preventDefault(); invia(e.target, async (d) => { await api("POST", "/api/dipendenti", d); toast("Dipendente aggiunto"); mostra("dipendenti"); }); };
+	const patch = async (id, corpo) => { try { await api("PATCH", `/api/dipendenti/${id}`, corpo); toast("Salvato"); mostra("dipendenti"); } catch (e) { toast(e.message, true); } };
+	document.querySelectorAll("[data-mod]").forEach((b) => (b.onclick = () => {
+		const ferie = prompt("Giorni di ferie annui", b.dataset.ferie); if (ferie === null) return;
+		const ore = prompt("Ore lavorative giornaliere", b.dataset.ore); if (ore === null) return;
+		patch(b.dataset.mod, { giorni_ferie_annui: Number(ferie), ore_giornaliere: Number(ore) });
+	}));
+	document.querySelectorAll("[data-pin]").forEach((b) => (b.onclick = () => { const pin = prompt("Nuovo PIN (4-12 cifre)"); if (pin) patch(b.dataset.pin, { pin }); }));
+	document.querySelectorAll("[data-att]").forEach((b) => (b.onclick = () => { if (confirm("Confermi?")) patch(b.dataset.att, { attivo: b.dataset.v === "1" }); }));
+}
+
+async function vistaImpostazioni(m) {
+	const admin = stato.utente.ruolo === "admin";
+	m.innerHTML = `<div class="card"><h2>Cambia PIN</h2><form class="form" id="fp">
+		<div><label>PIN attuale</label><input name="pin_attuale" type="password" inputmode="numeric" required></div>
+		<div><label>Nuovo PIN</label><input name="pin_nuovo" type="password" inputmode="numeric" pattern="\\d{4,12}" required></div>
+		<div><button class="btn" type="submit">Aggiorna</button></div></form></div>
+	${admin ? `<div class="card"><h2>Chiusure aziendali</h2>
+		<p class="muted">Le festività nazionali sono già incluse. Aggiungi patrono, ponti e chiusure collettive: non saranno conteggiati come assenze né come ferie.</p>
+		<form class="form" id="fc"><div><label>Dal</label><input type="date" name="data_inizio" required></div><div><label>Al</label><input type="date" name="data_fine"></div>
+		<div><label>Descrizione</label><input name="descrizione" required></div><div><button class="btn" type="submit">Aggiungi</button></div></form>
+		<div id="chiusure" style="margin-top:12px"></div></div>
+	<div class="card"><h2>Controlli automatici</h2><p class="muted">Vengono eseguiti ogni sera in automatico. Puoi rilanciarli su una giornata passata, ad esempio dopo aver corretto dei dati.</p>
+		<form class="form" id="fk"><div><label>Giornata</label><input type="date" name="data" required></div><div><button class="btn sec" type="submit">Esegui controlli</button></div></form></div>
+	<div class="card"><h2>Registro modifiche</h2><div id="reg" class="tabella"></div></div>` : ""}`;
+	$("#fp").onsubmit = (e) => { e.preventDefault(); invia(e.target, async (d) => { await api("POST", "/api/pin", d); toast("PIN aggiornato"); e.target.reset(); }); };
+	if (!admin) return;
+	const ch = await api("GET", `/api/chiusure?anno=${stato.oggi.data.slice(0, 4)}`);
+	$("#chiusure").innerHTML = ch.length ? `<table>${ch.map((c) => `<tr><td>${fmtData(c.data)}</td><td>${esc(c.descrizione)}</td><td><button class="btn sec pic" data-ch="${c.data}">Rimuovi</button></td></tr>`).join("")}</table>` : `<p class="muted">Nessuna chiusura per quest'anno.</p>`;
+	document.querySelectorAll("[data-ch]").forEach((b) => (b.onclick = async () => { await api("DELETE", `/api/chiusure/${b.dataset.ch}`); mostra("impostazioni"); }));
+	$("#fc").onsubmit = (e) => { e.preventDefault(); invia(e.target, async (d) => { await api("POST", "/api/chiusure", d); mostra("impostazioni"); }); };
+	$("#fk").onsubmit = (e) => { e.preventDefault(); invia(e.target, async (d) => {
+		const r = await api("POST", "/api/controlli", d);
+		toast(`Nuove anomalie: ${r.assenze_non_giustificate + r.uscite_mancanti + r.certificati_mancanti + r.denunce_inail_mancanti}`); }); };
+	const reg = await api("GET", "/api/registro");
+	$("#reg").innerHTML = `<table><tr><th>Quando</th><th>Chi</th><th>Azione</th><th>Dettagli</th></tr>${reg.map((r) =>
+		`<tr><td>${new Date(r.ts).toLocaleString("it-IT")}</td><td>${esc(r.cognome)} ${esc(r.nome)}</td><td>${esc(r.azione)}</td><td class="muted"><code>${esc(r.dettagli)}</code></td></tr>`).join("")}</table>`;
+}
+
+avvia().catch((e) => { $("#app").innerHTML = `<div class="accesso card">${esc(e.message)}</div>`; });
+</script>
+</body>
+</html>

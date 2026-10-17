@@ -1,0 +1,1293 @@
+<!doctype html>
+<html lang="it">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Quiz delle Capitali</title>
+		<style>
+			:root {
+				--bg: #f4f1ea;
+				--surface: #ffffff;
+				--text: #1d2330;
+				--muted: #5f6878;
+				--border: #e2ddd2;
+				--accent: #1f6feb;
+				--accent-text: #ffffff;
+				--ok: #1a7f4b;
+				--ok-bg: #e3f5ea;
+				--bad: #c0392b;
+				--bad-bg: #fbe6e3;
+				--warn: #9a6400;
+				--ring-track: #e8e4da;
+				color-scheme: light;
+			}
+
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #12151c;
+					--surface: #1c212b;
+					--text: #eef1f6;
+					--muted: #9aa3b2;
+					--border: #2c3340;
+					--accent: #4c8dff;
+					--accent-text: #0b1220;
+					--ok: #4fd18b;
+					--ok-bg: #143323;
+					--bad: #ff7b6b;
+					--bad-bg: #3a1c19;
+					--warn: #f0b44c;
+					--ring-track: #2c3340;
+					color-scheme: dark;
+				}
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--text);
+				font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+			}
+
+			.app {
+				max-width: 560px;
+				margin: 0 auto;
+				padding: 32px 16px 48px;
+			}
+
+			.screen {
+				display: flex;
+				flex-direction: column;
+				gap: 20px;
+			}
+
+			.screen[hidden],
+			[hidden] {
+				display: none !important;
+			}
+
+			h1 {
+				font-size: 2rem;
+				margin: 0;
+				letter-spacing: -0.02em;
+			}
+
+			h2 {
+				margin: 0;
+				font-size: 1.4rem;
+			}
+
+			.lead {
+				margin: 0;
+				color: var(--muted);
+			}
+
+			.panel,
+			.card {
+				background: var(--surface);
+				border: 1px solid var(--border);
+				border-radius: 16px;
+				padding: 20px;
+			}
+
+			form.panel {
+				display: flex;
+				flex-direction: column;
+				gap: 14px;
+			}
+
+			.field {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+				font-weight: 600;
+			}
+
+			input:not([type="checkbox"]) {
+				font: inherit;
+				padding: 10px 12px;
+				border-radius: 10px;
+				border: 1px solid var(--border);
+				background: var(--bg);
+				color: var(--text);
+				min-width: 0;
+			}
+
+			input:focus-visible,
+			button:focus-visible {
+				outline: 2px solid var(--accent);
+				outline-offset: 2px;
+			}
+
+			.check {
+				display: flex;
+				gap: 10px;
+				align-items: center;
+			}
+
+			.warning {
+				margin: 0;
+				color: var(--warn);
+				font-size: 0.92rem;
+			}
+
+			button {
+				font: inherit;
+				cursor: pointer;
+				border-radius: 10px;
+				border: 1px solid var(--border);
+				background: var(--surface);
+				color: var(--text);
+				padding: 10px 16px;
+			}
+
+			button.primary {
+				background: var(--accent);
+				border-color: var(--accent);
+				color: var(--accent-text);
+				font-weight: 700;
+				padding: 14px 18px;
+				font-size: 1.05rem;
+			}
+
+			button.ghost {
+				border: none;
+				background: none;
+				color: var(--muted);
+				text-decoration: underline;
+				align-self: center;
+			}
+
+			/* HUD */
+			.hud {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 12px;
+			}
+
+			.stat {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				min-width: 64px;
+			}
+
+			.stat span {
+				font-size: 0.75rem;
+				text-transform: uppercase;
+				letter-spacing: 0.08em;
+				color: var(--muted);
+			}
+
+			.stat strong {
+				font-size: 1.5rem;
+				font-variant-numeric: tabular-nums;
+			}
+
+			.dots {
+				display: flex;
+				gap: 8px;
+				list-style: none;
+				margin: 0;
+				padding: 0;
+			}
+
+			.dots li {
+				width: 14px;
+				height: 14px;
+				border-radius: 50%;
+				background: var(--ring-track);
+			}
+
+			.dots li.current {
+				outline: 2px solid var(--accent);
+				outline-offset: 2px;
+			}
+
+			.dots li.ok {
+				background: var(--ok);
+			}
+
+			.dots li.bad {
+				background: var(--bad);
+			}
+
+			/* Domanda */
+			.card {
+				position: relative;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				text-align: center;
+				gap: 12px;
+				padding: 28px 20px;
+				overflow: hidden;
+			}
+
+			.meta {
+				margin: 0;
+				color: var(--muted);
+				font-size: 0.9rem;
+			}
+
+			.country {
+				font-size: clamp(1.8rem, 7vw, 2.6rem);
+				line-height: 1.15;
+				letter-spacing: -0.02em;
+				overflow-wrap: anywhere;
+			}
+
+			.prompt {
+				margin: 0;
+				color: var(--muted);
+			}
+
+			.timer {
+				position: relative;
+				width: 120px;
+				height: 120px;
+				margin: 8px 0;
+			}
+
+			.timer svg {
+				width: 100%;
+				height: 100%;
+				transform: rotate(-90deg);
+			}
+
+			.timer circle {
+				fill: none;
+				stroke-width: 10;
+			}
+
+			.track {
+				stroke: var(--ring-track);
+			}
+
+			.ring {
+				stroke: var(--accent);
+				stroke-linecap: round;
+				stroke-dasharray: 326.73;
+				stroke-dashoffset: 0;
+			}
+
+			.timer.urgent .ring {
+				stroke: var(--bad);
+			}
+
+			#timer-num {
+				position: absolute;
+				inset: 0;
+				display: grid;
+				place-items: center;
+				font-size: 2.2rem;
+				font-weight: 700;
+				font-variant-numeric: tabular-nums;
+			}
+
+			.mic {
+				margin: 0;
+				min-height: 1.5em;
+				color: var(--muted);
+				font-size: 0.95rem;
+			}
+
+			.mic.listening::before {
+				content: "";
+				display: inline-block;
+				width: 10px;
+				height: 10px;
+				border-radius: 50%;
+				background: var(--bad);
+				margin-right: 8px;
+				animation: pulse 1s infinite;
+			}
+
+			@keyframes pulse {
+				50% {
+					opacity: 0.25;
+				}
+			}
+
+			.heard {
+				margin: 0;
+				min-height: 1.5em;
+				font-size: 1.1rem;
+				font-style: italic;
+			}
+
+			.heard.miss {
+				color: var(--bad);
+			}
+
+			.answer {
+				display: flex;
+				gap: 8px;
+				width: 100%;
+			}
+
+			.answer input {
+				flex: 1;
+			}
+
+			.answer.shake {
+				animation: shake 0.3s;
+			}
+
+			@keyframes shake {
+				25% {
+					transform: translateX(-6px);
+				}
+				75% {
+					transform: translateX(6px);
+				}
+			}
+
+			.feedback {
+				position: absolute;
+				inset: 0;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				gap: 6px;
+				padding: 20px;
+				font-size: 1.2rem;
+			}
+
+			.feedback.ok {
+				background: var(--ok-bg);
+				color: var(--ok);
+			}
+
+			.feedback.bad {
+				background: var(--bad-bg);
+				color: var(--bad);
+			}
+
+			.feedback .big {
+				font-size: 2rem;
+				font-weight: 800;
+			}
+
+			.feedback .answer-text {
+				color: var(--text);
+				font-size: 1.5rem;
+				font-weight: 700;
+			}
+
+			/* Riepiloghi */
+			.results {
+				list-style: none;
+				margin: 0;
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+			}
+
+			.results li {
+				display: flex;
+				justify-content: space-between;
+				gap: 12px;
+				align-items: baseline;
+			}
+
+			.results .mark {
+				font-weight: 700;
+				margin-right: 6px;
+			}
+
+			.results .ok .mark {
+				color: var(--ok);
+			}
+
+			.results .bad .mark {
+				color: var(--bad);
+			}
+
+			.results .capital {
+				color: var(--muted);
+				text-align: right;
+			}
+
+			.board h2 {
+				font-size: 1.1rem;
+				margin-bottom: 10px;
+			}
+
+			.leaderboard {
+				margin: 0;
+				padding-left: 1.5em;
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+			}
+
+			.leaderboard li span {
+				display: inline-flex;
+				justify-content: space-between;
+				width: 100%;
+				gap: 12px;
+			}
+
+			.leaderboard li.me {
+				font-weight: 700;
+				color: var(--accent);
+			}
+
+			.leaderboard .empty {
+				list-style: none;
+				margin-left: -1.5em;
+				color: var(--muted);
+			}
+
+			.leaderboard small {
+				color: var(--muted);
+				font-weight: 400;
+			}
+		</style>
+	</head>
+	<body>
+		<main class="app">
+			<!-- Schermata iniziale -->
+			<section id="screen-start" class="screen">
+				<h1>Quiz delle Capitali</h1>
+				<p class="lead">
+					Ti diciamo uno Stato del mondo: <strong>pronuncia la capitale entro 10 secondi</strong>.
+					Ogni livello ha 5 Stati e la difficoltà cresce. Servono almeno 3 risposte esatte per passare al livello
+					successivo.
+				</p>
+				<form id="start-form" class="panel">
+					<label class="field">
+						<span>Il tuo nome</span>
+						<input id="player" maxlength="20" required autocomplete="nickname" placeholder="Es. Giulia" />
+					</label>
+					<label class="check"><input type="checkbox" id="opt-voice" checked /> Rispondi a voce (microfono)</label>
+					<label class="check"><input type="checkbox" id="opt-speak" checked /> Leggi ad alta voce il nome dello Stato</label>
+					<p id="voice-warning" class="warning" hidden>
+						Questo browser non supporta il riconoscimento vocale: potrai rispondere scrivendo. Per giocare a voce usa
+						Chrome, Edge o Safari.
+					</p>
+					<button class="primary" type="submit">Inizia</button>
+				</form>
+				<div class="panel board">
+					<h2>Classifica <small>(su questo dispositivo)</small></h2>
+					<ol id="board-start" class="leaderboard"></ol>
+				</div>
+			</section>
+
+			<!-- Partita -->
+			<section id="screen-game" class="screen" hidden>
+				<header class="hud">
+					<div class="stat"><span>Livello</span><strong id="hud-level">1</strong></div>
+					<ol id="dots" class="dots" aria-label="Avanzamento del livello"></ol>
+					<div class="stat"><span>Punti</span><strong id="hud-score">0</strong></div>
+				</header>
+
+				<div class="card" id="card">
+					<p id="q-meta" class="meta"></p>
+					<h2 id="q-name" class="country"></h2>
+					<p class="prompt">Qual è la capitale?</p>
+
+					<div class="timer" aria-live="off">
+						<svg viewBox="0 0 120 120" aria-hidden="true">
+							<circle class="track" cx="60" cy="60" r="52" />
+							<circle id="ring" class="ring" cx="60" cy="60" r="52" />
+						</svg>
+						<span id="timer-num">10</span>
+					</div>
+
+					<p id="mic" class="mic"></p>
+					<p id="heard" class="heard" aria-live="polite"></p>
+
+					<form id="answer-form" class="answer">
+						<input id="answer" autocomplete="off" placeholder="Oppure scrivi la risposta" aria-label="Risposta" />
+						<button type="submit">Invia</button>
+					</form>
+					<button id="skip" class="ghost" type="button">Passa</button>
+
+					<div id="feedback" class="feedback" hidden aria-live="assertive"></div>
+				</div>
+			</section>
+
+			<!-- Fine livello -->
+			<section id="screen-level" class="screen" hidden>
+				<h2 id="level-title"></h2>
+				<p id="level-summary" class="lead"></p>
+				<ul id="level-results" class="results panel"></ul>
+				<button id="next-level" class="primary" type="button">Livello successivo</button>
+			</section>
+
+			<!-- Fine partita -->
+			<section id="screen-over" class="screen" hidden>
+				<h2 id="over-title"></h2>
+				<p id="over-summary" class="lead"></p>
+				<ul id="over-results" class="results panel"></ul>
+				<div class="panel board">
+					<h2>Classifica <small>(su questo dispositivo)</small></h2>
+					<ol id="board-over" class="leaderboard"></ol>
+				</div>
+				<button id="restart" class="primary" type="button">Gioca ancora</button>
+			</section>
+		</main>
+		<script>
+		// [Stato, capitale, risposte alternative separate da "|", difficoltà 1-5, continente]
+		const COUNTRY_DATA = [
+			["Italia", "Roma", "Rome", 1, "Europa"],
+			["Francia", "Parigi", "Paris", 1, "Europa"],
+			["Germania", "Berlino", "Berlin", 1, "Europa"],
+			["Spagna", "Madrid", "", 1, "Europa"],
+			["Regno Unito", "Londra", "London", 1, "Europa"],
+			["Portogallo", "Lisbona", "Lisboa|Lisbon", 1, "Europa"],
+			["Grecia", "Atene", "Athens|Athina", 1, "Europa"],
+			["Russia", "Mosca", "Moskva|Moscow", 1, "Europa"],
+			["Austria", "Vienna", "Wien", 1, "Europa"],
+			["Irlanda", "Dublino", "Dublin", 1, "Europa"],
+			["Paesi Bassi", "Amsterdam", "", 1, "Europa"],
+			["Belgio", "Bruxelles", "Brussel|Brussels", 1, "Europa"],
+			["Norvegia", "Oslo", "", 1, "Europa"],
+			["Svezia", "Stoccolma", "Stockholm", 1, "Europa"],
+			["Danimarca", "Copenaghen", "Copenhagen|Kobenhavn", 1, "Europa"],
+			["Polonia", "Varsavia", "Warszawa|Warsaw", 1, "Europa"],
+			["Ungheria", "Budapest", "", 1, "Europa"],
+			["Repubblica Ceca", "Praga", "Praha|Prague", 1, "Europa"],
+			["Finlandia", "Helsinki", "", 1, "Europa"],
+			["San Marino", "San Marino", "Città di San Marino", 1, "Europa"],
+			["Città del Vaticano", "Città del Vaticano", "Vaticano", 1, "Europa"],
+			["Principato di Monaco", "Monaco", "", 1, "Europa"],
+			["Lussemburgo", "Lussemburgo", "Luxembourg", 1, "Europa"],
+			["Giappone", "Tokyo", "Tokio", 1, "Asia"],
+			["Cina", "Pechino", "Beijing|Peking", 1, "Asia"],
+			["Corea del Sud", "Seul", "Seoul", 1, "Asia"],
+			["Thailandia", "Bangkok", "", 1, "Asia"],
+			["Egitto", "Il Cairo", "Cairo", 1, "Africa"],
+			["Stati Uniti", "Washington", "Washington DC", 1, "America"],
+			["Messico", "Città del Messico", "Mexico City|Ciudad de Mexico", 1, "America"],
+			["Argentina", "Buenos Aires", "", 1, "America"],
+			["Cuba", "L'Avana", "Avana|La Habana|Havana", 1, "America"],
+			["Perù", "Lima", "", 1, "America"],
+			["Svizzera", "Berna", "Bern", 2, "Europa"],
+			["Romania", "Bucarest", "Bucuresti|Bucharest", 2, "Europa"],
+			["Bulgaria", "Sofia", "", 2, "Europa"],
+			["Croazia", "Zagabria", "Zagreb", 2, "Europa"],
+			["Serbia", "Belgrado", "Beograd|Belgrade", 2, "Europa"],
+			["Islanda", "Reykjavík", "Reikiavik|Reykiavik", 2, "Europa"],
+			["Ucraina", "Kiev", "Kyiv|Kiyv", 2, "Europa"],
+			["Slovenia", "Lubiana", "Ljubljana", 2, "Europa"],
+			["Slovacchia", "Bratislava", "", 2, "Europa"],
+			["Malta", "La Valletta", "Valletta", 2, "Europa"],
+			["Albania", "Tirana", "", 2, "Europa"],
+			["Cipro", "Nicosia", "", 2, "Europa"],
+			["Bosnia ed Erzegovina", "Sarajevo", "", 2, "Europa"],
+			["Turchia", "Ankara", "", 2, "Asia"],
+			["India", "Nuova Delhi", "New Delhi|Delhi", 2, "Asia"],
+			["Israele", "Gerusalemme", "Jerusalem|Tel Aviv", 2, "Asia"],
+			["Iran", "Teheran", "Tehran", 2, "Asia"],
+			["Iraq", "Baghdad", "Bagdad", 2, "Asia"],
+			["Libano", "Beirut", "Beyrouth", 2, "Asia"],
+			["Siria", "Damasco", "Damascus", 2, "Asia"],
+			["Arabia Saudita", "Riad", "Riyadh|Riyad", 2, "Asia"],
+			["Indonesia", "Giacarta", "Jakarta", 2, "Asia"],
+			["Filippine", "Manila", "", 2, "Asia"],
+			["Vietnam", "Hanoi", "", 2, "Asia"],
+			["Afghanistan", "Kabul", "", 2, "Asia"],
+			["Pakistan", "Islamabad", "", 2, "Asia"],
+			["Singapore", "Singapore", "", 2, "Asia"],
+			["Malesia", "Kuala Lumpur", "", 2, "Asia"],
+			["Nepal", "Katmandu", "Kathmandu", 2, "Asia"],
+			["Marocco", "Rabat", "", 2, "Africa"],
+			["Tunisia", "Tunisi", "Tunis", 2, "Africa"],
+			["Algeria", "Algeri", "Algiers|Alger", 2, "Africa"],
+			["Kenya", "Nairobi", "", 2, "Africa"],
+			["Sudafrica", "Pretoria", "Città del Capo|Cape Town|Bloemfontein", 2, "Africa"],
+			["Etiopia", "Addis Abeba", "Addis Ababa", 2, "Africa"],
+			["Libia", "Tripoli", "", 2, "Africa"],
+			["Senegal", "Dakar", "", 2, "Africa"],
+			["Canada", "Ottawa", "", 2, "America"],
+			["Brasile", "Brasilia", "", 2, "America"],
+			["Cile", "Santiago", "Santiago del Cile", 2, "America"],
+			["Colombia", "Bogotà", "", 2, "America"],
+			["Venezuela", "Caracas", "", 2, "America"],
+			["Uruguay", "Montevideo", "", 2, "America"],
+			["Panama", "Panama", "Città di Panama|Panama City", 2, "America"],
+			["Australia", "Canberra", "", 2, "Oceania"],
+			["Nuova Zelanda", "Wellington", "", 2, "Oceania"],
+			["Estonia", "Tallinn", "", 3, "Europa"],
+			["Lettonia", "Riga", "", 3, "Europa"],
+			["Lituania", "Vilnius", "Vilna", 3, "Europa"],
+			["Bielorussia", "Minsk", "", 3, "Europa"],
+			["Montenegro", "Podgorica", "", 3, "Europa"],
+			["Macedonia del Nord", "Skopje", "Scopje|Skopie", 3, "Europa"],
+			["Liechtenstein", "Vaduz", "", 3, "Europa"],
+			["Andorra", "Andorra la Vella", "Andorra", 3, "Europa"],
+			["Corea del Nord", "Pyongyang", "Piongiang|Pyongiang", 3, "Asia"],
+			["Emirati Arabi Uniti", "Abu Dhabi", "", 3, "Asia"],
+			["Qatar", "Doha", "", 3, "Asia"],
+			["Giordania", "Amman", "", 3, "Asia"],
+			["Kuwait", "Kuwait City", "Kuwait|Città del Kuwait", 3, "Asia"],
+			["Georgia", "Tbilisi", "Tiflis", 3, "Asia"],
+			["Azerbaigian", "Baku", "", 3, "Asia"],
+			["Mongolia", "Ulan Bator", "Ulaanbaatar|Ulan Baatar", 3, "Asia"],
+			["Cambogia", "Phnom Penh", "Pnom Pen|Phnom Pen", 3, "Asia"],
+			["Nigeria", "Abuja", "", 3, "Africa"],
+			["Ghana", "Accra", "", 3, "Africa"],
+			["Sudan", "Khartum", "Khartoum|Kartum", 3, "Africa"],
+			["Somalia", "Mogadiscio", "Mogadishu", 3, "Africa"],
+			["Gibuti", "Gibuti", "Djibouti", 3, "Africa"],
+			["Repubblica Democratica del Congo", "Kinshasa", "Kinsciasa", 3, "Africa"],
+			["Guinea-Bissau", "Bissau", "", 3, "Africa"],
+			["Giamaica", "Kingston", "", 3, "America"],
+			["Ecuador", "Quito", "", 3, "America"],
+			["Costa Rica", "San José", "", 3, "America"],
+			["Bolivia", "Sucre", "La Paz", 3, "America"],
+			["Paraguay", "Asunción", "Asunsion", 3, "America"],
+			["Guatemala", "Città del Guatemala", "Guatemala|Guatemala City", 3, "America"],
+			["El Salvador", "San Salvador", "", 3, "America"],
+			["Repubblica Dominicana", "Santo Domingo", "", 3, "America"],
+			["Bahamas", "Nassau", "", 3, "America"],
+			["Moldavia", "Chișinău", "Chisinau|Kishinev|Kisinau", 4, "Europa"],
+			["Armenia", "Erevan", "Yerevan", 4, "Asia"],
+			["Kazakistan", "Astana", "Nur-Sultan", 4, "Asia"],
+			["Uzbekistan", "Tashkent", "Taskent", 4, "Asia"],
+			["Bangladesh", "Dacca", "Dhaka|Daka", 4, "Asia"],
+			["Laos", "Vientiane", "Vientian", 4, "Asia"],
+			["Maldive", "Malé", "", 4, "Asia"],
+			["Bahrein", "Manama", "", 4, "Asia"],
+			["Oman", "Mascate", "Muscat|Masqat", 4, "Asia"],
+			["Yemen", "Sana'a", "Sanaa|Sana", 4, "Asia"],
+			["Uganda", "Kampala", "", 4, "Africa"],
+			["Tanzania", "Dodoma", "", 4, "Africa"],
+			["Angola", "Luanda", "", 4, "Africa"],
+			["Mozambico", "Maputo", "", 4, "Africa"],
+			["Zimbabwe", "Harare", "", 4, "Africa"],
+			["Zambia", "Lusaka", "", 4, "Africa"],
+			["Madagascar", "Antananarivo", "Tananarive", 4, "Africa"],
+			["Camerun", "Yaoundé", "Iaunde|Yaunde", 4, "Africa"],
+			["Repubblica del Congo", "Brazzaville", "Brazavil", 4, "Africa"],
+			["Mali", "Bamako", "", 4, "Africa"],
+			["Burkina Faso", "Ouagadougou", "Uagadugu|Wagadugu", 4, "Africa"],
+			["Sierra Leone", "Freetown", "", 4, "Africa"],
+			["Liberia", "Monrovia", "", 4, "Africa"],
+			["Togo", "Lomé", "", 4, "Africa"],
+			["Gabon", "Libreville", "", 4, "Africa"],
+			["Eritrea", "Asmara", "", 4, "Africa"],
+			["Ruanda", "Kigali", "", 4, "Africa"],
+			["Mauritius", "Port Louis", "", 4, "Africa"],
+			["Seychelles", "Victoria", "", 4, "Africa"],
+			["São Tomé e Príncipe", "São Tomé", "San Tomè", 4, "Africa"],
+			["Honduras", "Tegucigalpa", "", 4, "America"],
+			["Nicaragua", "Managua", "", 4, "America"],
+			["Haiti", "Port-au-Prince", "Porto Principe", 4, "America"],
+			["Guyana", "Georgetown", "", 4, "America"],
+			["Suriname", "Paramaribo", "", 4, "America"],
+			["Papua Nuova Guinea", "Port Moresby", "", 4, "Oceania"],
+			["Figi", "Suva", "", 4, "Oceania"],
+			["Turkmenistan", "Ashgabat", "Asgabat|Ashkhabad", 5, "Asia"],
+			["Kirghizistan", "Bishkek", "Biskek", 5, "Asia"],
+			["Tagikistan", "Dushanbe", "Duscianbe", 5, "Asia"],
+			["Sri Lanka", "Sri Jayawardenepura Kotte", "Kotte|Colombo", 5, "Asia"],
+			["Myanmar", "Naypyidaw", "Naypyitaw|Nay Pyi Taw|Naypidaw", 5, "Asia"],
+			["Bhutan", "Thimphu", "Timpu|Thimpu", 5, "Asia"],
+			["Brunei", "Bandar Seri Begawan", "", 5, "Asia"],
+			["Timor Est", "Dili", "", 5, "Asia"],
+			["Sud Sudan", "Giuba", "Juba", 5, "Africa"],
+			["Costa d'Avorio", "Yamoussoukro", "Yamusukro|Iamusucro", 5, "Africa"],
+			["Niger", "Niamey", "Niamei", 5, "Africa"],
+			["Ciad", "N'Djamena", "Ndjamena|Gnamena|Ngiamena", 5, "Africa"],
+			["Mauritania", "Nouakchott", "Nuakchott|Nuaksciot", 5, "Africa"],
+			["Guinea", "Conakry", "Conacri", 5, "Africa"],
+			["Benin", "Porto-Novo", "", 5, "Africa"],
+			["Guinea Equatoriale", "Malabo", "", 5, "Africa"],
+			["Repubblica Centrafricana", "Bangui", "", 5, "Africa"],
+			["Burundi", "Gitega", "", 5, "Africa"],
+			["Malawi", "Lilongwe", "Lilongue", 5, "Africa"],
+			["Botswana", "Gaborone", "", 5, "Africa"],
+			["Namibia", "Windhoek", "Windhuk|Vindhuk", 5, "Africa"],
+			["Lesotho", "Maseru", "", 5, "Africa"],
+			["Eswatini", "Mbabane", "Lobamba", 5, "Africa"],
+			["Comore", "Moroni", "", 5, "Africa"],
+			["Capo Verde", "Praia", "", 5, "Africa"],
+			["Gambia", "Banjul", "Bangiul", 5, "Africa"],
+			["Barbados", "Bridgetown", "", 5, "America"],
+			["Trinidad e Tobago", "Port of Spain", "Porto di Spagna", 5, "America"],
+			["Grenada", "Saint George's", "St George's", 5, "America"],
+			["Santa Lucia", "Castries", "", 5, "America"],
+			["Saint Vincent e Grenadine", "Kingstown", "", 5, "America"],
+			["Antigua e Barbuda", "Saint John's", "St John's", 5, "America"],
+			["Dominica", "Roseau", "", 5, "America"],
+			["Saint Kitts e Nevis", "Basseterre", "", 5, "America"],
+			["Belize", "Belmopan", "", 5, "America"],
+			["Samoa", "Apia", "", 5, "Oceania"],
+			["Tonga", "Nuku'alofa", "Nukualofa", 5, "Oceania"],
+			["Vanuatu", "Port Vila", "", 5, "Oceania"],
+			["Isole Salomone", "Honiara", "", 5, "Oceania"],
+			["Kiribati", "Tarawa", "South Tarawa|Tarawa Sud", 5, "Oceania"],
+			["Tuvalu", "Funafuti", "", 5, "Oceania"],
+			["Nauru", "Yaren", "", 5, "Oceania"],
+			["Palau", "Ngerulmud", "", 5, "Oceania"],
+			["Isole Marshall", "Majuro", "", 5, "Oceania"],
+			["Micronesia", "Palikir", "", 5, "Oceania"],
+		];
+
+		// Confronto tollerante tra quanto detto/scritto dall'utente e la capitale attesa.
+		// Il riconoscimento vocale italiano trascrive i nomi stranieri "a orecchio"
+		// (es. "Wagadugu" per Ouagadougou), quindi si normalizza la grafia e si
+		// accettano piccole differenze.
+
+		function normalize(text) {
+			return text
+				.toLowerCase()
+				.normalize("NFD")
+				.replace(/[̀-ͯ]/g, "")
+				.replace(/[^a-z0-9]+/g, " ")
+				.trim();
+		}
+
+		// Semplificazione fonetica di una parola: rende equivalenti grafie diverse
+		// dello stesso suono (k/c, y/i, w/u, sh/sc, doppie...).
+		function phonetic(word) {
+			return word
+				.replace(/ph/g, "f")
+				.replace(/sh/g, "sc")
+				.replace(/[kq]/g, "c")
+				.replace(/y/g, "i")
+				.replace(/w/g, "u")
+				.replace(/j/g, "i")
+				.replace(/h/g, "")
+				.replace(/ou/g, "u")
+				.replace(/(.)\1+/g, "$1");
+		}
+
+		function tokens(text) {
+			return normalize(text).split(" ").map(phonetic).filter(Boolean);
+		}
+
+		function levenshtein(a, b) {
+			let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+			for (let i = 1; i <= a.length; i++) {
+				const cur = [i];
+				for (let j = 1; j <= b.length; j++) {
+					cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+				}
+				prev = cur;
+			}
+			return prev[b.length];
+		}
+
+		// Errori ammessi in base alla lunghezza: nessuno per le parole brevi
+		// (Roma, Riga, Lima...), uno o due per quelle più lunghe.
+		function allowedEdits(length) {
+			if (length <= 4) return 0;
+			if (length <= 7) return 1;
+			return 2;
+		}
+
+		function isCorrect(answer, country) {
+			const said = tokens(answer);
+			if (!said.length) return false;
+
+			for (const accepted of [country.capital, ...country.aliases]) {
+				const parts = tokens(accepted);
+				if (!parts.length) continue;
+				const target = parts.join("");
+				const maxEdits = allowedEdits(target.length);
+
+				// Cerca la capitale dentro la frase ("credo sia Roma"), anche se il
+				// riconoscimento l'ha spezzata o unita in un numero diverso di parole.
+				for (let size = Math.max(1, parts.length - 1); size <= parts.length + 1; size++) {
+					for (let i = 0; i + size <= said.length; i++) {
+						const window = said.slice(i, i + size).join("");
+						if (window === target) return true;
+						if (Math.abs(window.length - target.length) <= maxEdits && levenshtein(window, target) <= maxEdits) {
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+		}
+
+		const SECONDS = 10;
+		const PER_LEVEL = 5;
+		const PASS_THRESHOLD = 3;
+		const PERFECT_BONUS = 25;
+		const RING_LENGTH = 2 * Math.PI * 52;
+		const SCORES_KEY = "quiz-capitali-classifica";
+
+		// Composizione di ogni livello: la difficoltà (fascia 1-5) di ciascuna delle 5 domande.
+		// Dal livello 9 in poi tutte le domande sono di difficoltà massima.
+		const LEVEL_PLAN = [
+			[1, 1, 1, 1, 1],
+			[1, 1, 2, 2, 2],
+			[2, 2, 2, 2, 3],
+			[2, 3, 3, 3, 3],
+			[3, 3, 3, 4, 4],
+			[3, 4, 4, 4, 4],
+			[4, 4, 4, 5, 5],
+			[4, 5, 5, 5, 5],
+		];
+		const LAST_PLAN = [5, 5, 5, 5, 5];
+
+		const COUNTRIES = COUNTRY_DATA.map(([name, capital, aliases, tier, continent], id) => ({
+			id,
+			name,
+			capital,
+			aliases: aliases ? aliases.split("|") : [],
+			tier,
+			continent,
+		}));
+
+		const TIER_LABELS = ["", "Facilissimo", "Facile", "Medio", "Difficile", "Difficilissimo"];
+
+		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+		const $ = (id) => document.getElementById(id);
+
+		const state = {
+			player: "",
+			voice: true,
+			speak: true,
+			level: 1,
+			score: 0,
+			correctTotal: 0,
+			seen: [],
+			questions: [],
+			index: 0,
+			results: [],
+			allResults: [],
+			active: false,
+			deadline: 0,
+			frame: 0,
+			recognition: null,
+			restarts: 0,
+		};
+
+		// ---------- Utilità ----------
+
+		function show(screenId) {
+			for (const s of document.querySelectorAll(".screen")) s.hidden = s.id !== screenId;
+			window.scrollTo(0, 0);
+		}
+
+		function storage(key, value) {
+			try {
+				if (value === undefined) return localStorage.getItem(key);
+				localStorage.setItem(key, value);
+			} catch {
+				return null;
+			}
+		}
+
+		const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+		function el(tag, props = {}, ...children) {
+			const node = Object.assign(document.createElement(tag), props);
+			node.append(...children);
+			return node;
+		}
+
+		// ---------- Sintesi vocale ----------
+
+		function italianVoice() {
+			const voices = speechSynthesis.getVoices();
+			return voices.find((v) => v.lang === "it-IT") || voices.find((v) => v.lang.startsWith("it"));
+		}
+
+		function speak(text) {
+			return new Promise((resolve) => {
+				if (!state.speak || !("speechSynthesis" in window)) return resolve();
+				const utterance = new SpeechSynthesisUtterance(text);
+				utterance.lang = "it-IT";
+				const voice = italianVoice();
+				if (voice) utterance.voice = voice;
+				const done = () => {
+					clearTimeout(fallback);
+					resolve();
+				};
+				// Alcuni browser non emettono mai "end": non bloccare il gioco.
+				const fallback = setTimeout(done, 4000);
+				utterance.onend = done;
+				utterance.onerror = done;
+				speechSynthesis.cancel();
+				speechSynthesis.speak(utterance);
+			});
+		}
+
+		// ---------- Riconoscimento vocale ----------
+
+		function setMic(text, listening = false) {
+			$("mic").textContent = text;
+			$("mic").classList.toggle("listening", listening);
+		}
+
+		function showHeard(text, miss = false) {
+			$("heard").textContent = text ? `«${text.trim()}»` : "";
+			$("heard").classList.toggle("miss", miss);
+		}
+
+		function startListening(country) {
+			if (!state.voice) return;
+			const recognition = new SpeechRecognition();
+			recognition.lang = "it-IT";
+			recognition.continuous = true;
+			recognition.interimResults = true;
+			recognition.maxAlternatives = 5;
+
+			recognition.onresult = (event) => {
+				if (state.recognition !== recognition) return;
+				for (let i = event.resultIndex; i < event.results.length; i++) {
+					const result = event.results[i];
+					const alternatives = Array.from(result, (alt) => alt.transcript);
+					if (alternatives.some((t) => isCorrect(t, country))) {
+						showHeard(alternatives.find((t) => isCorrect(t, country)));
+						return finishQuestion(true);
+					}
+					showHeard(alternatives[0], result.isFinal);
+				}
+			};
+
+			recognition.onerror = (event) => {
+				if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+					switchToKeyboard("Microfono non autorizzato: rispondi scrivendo.");
+				}
+			};
+
+			// Chrome chiude la sessione dopo qualche secondo di silenzio: riaprila
+			// finché la domanda è attiva.
+			recognition.onend = () => {
+				if (state.active && state.recognition === recognition && state.restarts++ < 8) {
+					try {
+						recognition.start();
+					} catch {
+						/* già avviata */
+					}
+				}
+			};
+
+			state.recognition = recognition;
+			state.restarts = 0;
+			try {
+				recognition.start();
+				setMic("Ti ascolto… pronuncia la capitale", true);
+			} catch {
+				switchToKeyboard("Impossibile avviare il microfono: rispondi scrivendo.");
+			}
+		}
+
+		function stopListening() {
+			const recognition = state.recognition;
+			state.recognition = null;
+			if (!recognition) return;
+			recognition.onend = null;
+			try {
+				recognition.abort();
+			} catch {
+				/* già ferma */
+			}
+		}
+
+		function switchToKeyboard(message) {
+			state.voice = false;
+			stopListening();
+			setMic(message);
+			$("answer").focus();
+		}
+
+		// ---------- Timer ----------
+
+		function startTimer() {
+			state.deadline = performance.now() + SECONDS * 1000;
+			const tick = () => {
+				if (!state.active) return;
+				const left = Math.max(0, state.deadline - performance.now());
+				$("timer-num").textContent = Math.ceil(left / 1000);
+				$("ring").style.strokeDashoffset = RING_LENGTH * (1 - left / (SECONDS * 1000));
+				document.querySelector(".timer").classList.toggle("urgent", left <= 3000);
+				if (left <= 0) return finishQuestion(false);
+				state.frame = requestAnimationFrame(tick);
+			};
+			state.frame = requestAnimationFrame(tick);
+		}
+
+		function resetTimer() {
+			cancelAnimationFrame(state.frame);
+			$("timer-num").textContent = SECONDS;
+			$("ring").style.strokeDashoffset = 0;
+			document.querySelector(".timer").classList.remove("urgent");
+		}
+
+		// ---------- Flusso di gioco ----------
+
+		function shuffle(list) {
+			for (let i = list.length - 1; i > 0; i--) {
+				const j = Math.floor(Math.random() * (i + 1));
+				[list[i], list[j]] = [list[j], list[i]];
+			}
+			return list;
+		}
+
+		function pickCountries(level) {
+			const plan = LEVEL_PLAN[level - 1] ?? LAST_PLAN;
+			const pool = shuffle(COUNTRIES.filter((c) => !state.seen.includes(c.id)));
+			const picked = [];
+			for (const tier of plan) {
+				const i = pool.findIndex((c) => c.tier === tier);
+				if (i >= 0) picked.push(...pool.splice(i, 1));
+			}
+			// Se una fascia è esaurita, completa con gli Stati rimasti di difficoltà più vicina.
+			const target = Math.max(...plan);
+			pool.sort((a, b) => Math.abs(a.tier - target) - Math.abs(b.tier - target));
+			picked.push(...pool.slice(0, PER_LEVEL - picked.length));
+			return picked.sort((a, b) => a.tier - b.tier);
+		}
+
+		function loadLevel() {
+			const countries = pickCountries(state.level);
+			if (!countries.length) return gameOver(true);
+
+			state.questions = countries;
+			state.index = 0;
+			state.results = [];
+			state.seen.push(...countries.map((c) => c.id));
+			$("hud-level").textContent = state.level;
+			show("screen-game");
+			askQuestion();
+		}
+
+		function renderDots() {
+			const dots = $("dots");
+			dots.replaceChildren();
+			state.questions.forEach((_, i) => {
+				const r = state.results[i];
+				const cls = r ? (r.correct ? "ok" : "bad") : i === state.index ? "current" : "";
+				dots.append(el("li", { className: cls }));
+			});
+		}
+
+		async function askQuestion() {
+			const country = state.questions[state.index];
+			renderDots();
+			resetTimer();
+			$("feedback").hidden = true;
+			$("q-name").textContent = country.name;
+			$("q-meta").textContent = `${country.continent} · ${TIER_LABELS[country.tier]}`;
+			$("answer").value = "";
+			showHeard("");
+			setMic(state.speak ? "Ascolta…" : "");
+
+			await speak(country.name);
+
+			state.active = true;
+			startTimer();
+			if (state.voice) startListening(country);
+			else {
+				setMic("Scrivi la capitale e premi Invio");
+				$("answer").focus();
+			}
+		}
+
+		async function finishQuestion(correct) {
+			if (!state.active) return;
+			state.active = false;
+			cancelAnimationFrame(state.frame);
+			stopListening();
+
+			const country = state.questions[state.index];
+			const secondsLeft = Math.max(0, Math.ceil((state.deadline - performance.now()) / 1000));
+			const points = correct ? country.tier * 10 + secondsLeft : 0;
+			state.score += points;
+			if (correct) state.correctTotal++;
+			const result = { country, correct, points };
+			state.results.push(result);
+			state.allResults.push(result);
+			$("hud-score").textContent = state.score;
+			renderDots();
+
+			const feedback = $("feedback");
+			feedback.className = `feedback ${correct ? "ok" : "bad"}`;
+			feedback.replaceChildren(
+				el("span", { className: "big", textContent: correct ? "Esatto!" : secondsLeft ? "Passato" : "Tempo scaduto" }),
+				correct
+					? el("span", { textContent: `+${points} punti` })
+					: el("span", { textContent: "La capitale è" }),
+				el("span", { className: "answer-text", textContent: country.capital }),
+			);
+			feedback.hidden = false;
+			if (!correct) speak(`La capitale è ${country.capital}`);
+
+			await wait(correct ? 1300 : 2400);
+
+			state.index++;
+			if (state.index < state.questions.length) askQuestion();
+			else endLevel();
+		}
+
+		function renderResults(list, results) {
+			list.replaceChildren(
+				...results.map(({ country, correct, points }) =>
+					el(
+						"li",
+						{ className: correct ? "ok" : "bad" },
+						el("span", {}, el("span", { className: "mark", textContent: correct ? "✓" : "✗" }), country.name),
+						el("span", { className: "capital", textContent: correct ? `${country.capital} · +${points}` : country.capital }),
+					),
+				),
+			);
+		}
+
+		function endLevel() {
+			const correct = state.results.filter((r) => r.correct).length;
+			if (correct < PASS_THRESHOLD) return gameOver(false);
+
+			let bonus = "";
+			if (correct === state.questions.length) {
+				state.score += PERFECT_BONUS;
+				bonus = ` Livello perfetto: +${PERFECT_BONUS} punti bonus!`;
+			}
+			$("level-title").textContent = `Livello ${state.level} superato!`;
+			$("level-summary").textContent = `${correct} su ${state.questions.length} risposte esatte.${bonus} Punteggio: ${state.score}.`;
+			renderResults($("level-results"), state.results);
+			show("screen-level");
+			$("next-level").focus();
+		}
+
+		function gameOver(completed) {
+			$("over-title").textContent = completed ? "Hai indovinato tutte le capitali del mondo!" : "Partita finita";
+			const reached = completed ? state.level - 1 : state.level;
+			$("over-summary").textContent = completed
+				? `Incredibile, ${state.player}! Punteggio finale: ${state.score}.`
+				: `Servivano almeno ${PASS_THRESHOLD} risposte esatte su ${PER_LEVEL}. Sei arrivato al livello ${reached} con ${state.score} punti (${state.correctTotal} capitali indovinate).`;
+			renderResults($("over-results"), state.results.length ? state.results : state.allResults.slice(-PER_LEVEL));
+			show("screen-over");
+
+			const scores = loadScores();
+			scores.push({ player: state.player, score: state.score, level: Math.max(1, reached), correct: state.correctTotal });
+			scores.sort((a, b) => b.score - a.score);
+			const top = scores.slice(0, 10);
+			storage(SCORES_KEY, JSON.stringify(top));
+			renderBoard($("board-over"), top);
+		}
+
+		// ---------- Classifica ----------
+
+		function renderBoard(list, scores) {
+			if (!scores) {
+				list.replaceChildren(el("li", { className: "empty", textContent: "Classifica non disponibile." }));
+				return;
+			}
+			if (!scores.length) {
+				list.replaceChildren(el("li", { className: "empty", textContent: "Nessun punteggio ancora: sii il primo!" }));
+				return;
+			}
+			list.replaceChildren(
+				...scores.map((s) =>
+					el(
+						"li",
+						{ className: s.player === state.player ? "me" : "" },
+						el(
+							"span",
+							{},
+							el("span", {}, `${s.player} `, el("small", { textContent: `liv. ${s.level}` })),
+							el("strong", { textContent: s.score }),
+						),
+					),
+				),
+			);
+		}
+
+		// La classifica è salvata nel browser (localStorage), quindi è locale a questo dispositivo.
+		function loadScores() {
+			try {
+				const scores = JSON.parse(storage(SCORES_KEY) || "[]");
+				return Array.isArray(scores) ? scores : [];
+			} catch {
+				return [];
+			}
+		}
+
+		function loadBoard() {
+			renderBoard($("board-start"), loadScores());
+		}
+
+		// ---------- Avvio ----------
+
+		function startGame() {
+			Object.assign(state, {
+				level: 1,
+				score: 0,
+				correctTotal: 0,
+				seen: [],
+				results: [],
+				allResults: [],
+			});
+			$("hud-score").textContent = 0;
+			loadLevel();
+		}
+
+		function init() {
+			const voiceBox = $("opt-voice");
+			if (!SpeechRecognition) {
+				voiceBox.checked = false;
+				voiceBox.disabled = true;
+				$("voice-warning").hidden = false;
+			}
+			if (!("speechSynthesis" in window)) {
+				$("opt-speak").checked = false;
+				$("opt-speak").disabled = true;
+			} else {
+				// Carica in anticipo le voci (Chrome le rende disponibili in modo asincrono).
+				speechSynthesis.getVoices();
+			}
+			$("player").value = storage("player") || "";
+
+			$("start-form").addEventListener("submit", (event) => {
+				event.preventDefault();
+				state.player = $("player").value.trim().slice(0, 20);
+				if (!state.player) return;
+				storage("player", state.player);
+				state.voice = voiceBox.checked && !!SpeechRecognition;
+				state.speak = $("opt-speak").checked;
+				startGame();
+			});
+
+			$("answer-form").addEventListener("submit", (event) => {
+				event.preventDefault();
+				if (!state.active) return;
+				const text = $("answer").value;
+				if (!text.trim()) return;
+				if (isCorrect(text, state.questions[state.index])) {
+					showHeard(text);
+					finishQuestion(true);
+				} else {
+					showHeard(text, true);
+					$("answer").value = "";
+					const form = $("answer-form");
+					form.classList.remove("shake");
+					void form.offsetWidth;
+					form.classList.add("shake");
+				}
+			});
+
+			$("skip").addEventListener("click", () => finishQuestion(false));
+
+			$("next-level").addEventListener("click", () => {
+				state.level++;
+				loadLevel();
+			});
+
+			$("restart").addEventListener("click", () => {
+				show("screen-start");
+				loadBoard();
+			});
+
+			loadBoard();
+		}
+
+		init();
+		</script>
+	</body>
+</html>

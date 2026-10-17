@@ -13,6 +13,12 @@ e il giocatore deve **pronunciare la capitale entro 10 secondi**.
   o `localhost`). Il confronto della risposta (`public/match.js`) tollera accenti, grafie straniere
   e piccoli errori di trascrizione. Senza microfono si può rispondere scrivendo.
 
+## Versione single file
+
+`quiz-capitali.html` è lo stesso gioco in un unico file HTML + JS, senza server: basta aprirlo nel
+browser (per il microfono serve HTTPS o `localhost`; Chrome lo consente anche da `file://`). Gli Stati sono
+incorporati nel file e la classifica è salvata nel `localStorage` del browser.
+
 ## Struttura
 
 - `public/` — frontend statico (HTML, CSS, JS) servito come Workers Static Assets

@@ -1,3 +1,34 @@
+# Quiz delle Capitali (Worker + D1)
+
+Quiz interattivo: viene mostrato (e letto ad alta voce) il nome di uno Stato scelto a caso
+e il giocatore deve **pronunciare la capitale entro 10 secondi**.
+
+- **Livelli da 5 Stati** con difficoltà crescente: ogni Stato ha una fascia di difficoltà 1–5
+  (`migrations/0002_create_quiz_tables.sql`) e la composizione di ogni livello è in `LEVEL_PLAN`
+  (`src/index.ts`). Dal livello 9 tutte le domande sono di fascia 5, finché restano Stati.
+- Servono **almeno 3 risposte esatte su 5** per passare al livello successivo.
+- Punti: `10 × difficoltà + secondi rimasti`, più 25 punti bonus per un livello perfetto.
+- Classifica salvata in D1 (tabella `scores`).
+- Riconoscimento vocale in italiano con la Web Speech API (Chrome, Edge, Safari; richiede HTTPS
+  o `localhost`). Il confronto della risposta (`public/match.js`) tollera accenti, grafie straniere
+  e piccoli errori di trascrizione. Senza microfono si può rispondere scrivendo.
+
+## Struttura
+
+- `public/` — frontend statico (HTML, CSS, JS) servito come Workers Static Assets
+- `src/index.ts` — API: `GET /api/level?n=<livello>&exclude=<id,...>`, `GET /api/scores`, `POST /api/scores`
+- `migrations/` — schema e dati (194 Stati con capitale, risposte alternative, difficoltà e continente)
+
+## Sviluppo locale
+
+```bash
+npm install
+npx wrangler d1 migrations apply DB --local
+npx wrangler dev
+```
+
+---
+
 # Worker + D1 Database
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/templates/tree/main/d1-template)

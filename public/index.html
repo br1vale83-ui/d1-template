@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="it">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Quiz delle Capitali</title>
+		<link rel="stylesheet" href="/style.css" />
+		<script type="module" src="/app.js"></script>
+	</head>
+	<body>
+		<main class="app">
+			<!-- Schermata iniziale -->
+			<section id="screen-start" class="screen">
+				<h1>Quiz delle Capitali</h1>
+				<p class="lead">
+					Ti diciamo uno Stato del mondo: <strong>pronuncia la capitale entro 10 secondi</strong>.
+					Ogni livello ha 5 Stati e la difficoltà cresce. Servono almeno 3 risposte esatte per passare al livello
+					successivo.
+				</p>
+				<form id="start-form" class="panel">
+					<label class="field">
+						<span>Il tuo nome</span>
+						<input id="player" maxlength="20" required autocomplete="nickname" placeholder="Es. Giulia" />
+					</label>
+					<label class="check"><input type="checkbox" id="opt-voice" checked /> Rispondi a voce (microfono)</label>
+					<label class="check"><input type="checkbox" id="opt-speak" checked /> Leggi ad alta voce il nome dello Stato</label>
+					<p id="voice-warning" class="warning" hidden>
+						Questo browser non supporta il riconoscimento vocale: potrai rispondere scrivendo. Per giocare a voce usa
+						Chrome, Edge o Safari.
+					</p>
+					<button class="primary" type="submit">Inizia</button>
+				</form>
+				<div class="panel board">
+					<h2>Classifica</h2>
+					<ol id="board-start" class="leaderboard"></ol>
+				</div>
+			</section>
+
+			<!-- Partita -->
+			<section id="screen-game" class="screen" hidden>
+				<header class="hud">
+					<div class="stat"><span>Livello</span><strong id="hud-level">1</strong></div>
+					<ol id="dots" class="dots" aria-label="Avanzamento del livello"></ol>
+					<div class="stat"><span>Punti</span><strong id="hud-score">0</strong></div>
+				</header>
+
+				<div class="card" id="card">
+					<p id="q-meta" class="meta"></p>
+					<h2 id="q-name" class="country"></h2>
+					<p class="prompt">Qual è la capitale?</p>
+
+					<div class="timer" aria-live="off">
+						<svg viewBox="0 0 120 120" aria-hidden="true">
+							<circle class="track" cx="60" cy="60" r="52" />
+							<circle id="ring" class="ring" cx="60" cy="60" r="52" />
+						</svg>
+						<span id="timer-num">10</span>
+					</div>
+
+					<p id="mic" class="mic"></p>
+					<p id="heard" class="heard" aria-live="polite"></p>
+
+					<form id="answer-form" class="answer">
+						<input id="answer" autocomplete="off" placeholder="Oppure scrivi la risposta" aria-label="Risposta" />
+						<button type="submit">Invia</button>
+					</form>
+					<button id="skip" class="ghost" type="button">Passa</button>
+
+					<div id="feedback" class="feedback" hidden aria-live="assertive"></div>
+				</div>
+			</section>
+
+			<!-- Fine livello -->
+			<section id="screen-level" class="screen" hidden>
+				<h2 id="level-title"></h2>
+				<p id="level-summary" class="lead"></p>
+				<ul id="level-results" class="results panel"></ul>
+				<button id="next-level" class="primary" type="button">Livello successivo</button>
+			</section>
+
+			<!-- Fine partita -->
+			<section id="screen-over" class="screen" hidden>
+				<h2 id="over-title"></h2>
+				<p id="over-summary" class="lead"></p>
+				<ul id="over-results" class="results panel"></ul>
+				<div class="panel board">
+					<h2>Classifica</h2>
+					<ol id="board-over" class="leaderboard"></ol>
+				</div>
+				<button id="restart" class="primary" type="button">Gioca ancora</button>
+			</section>
+		</main>
+	</body>
+</html>

@@ -341,6 +341,12 @@
 				}
 			}
 
+			.mic-btn {
+				border-color: var(--accent);
+				color: var(--accent);
+				font-weight: 600;
+			}
+
 			.heard {
 				margin: 0;
 				min-height: 1.5em;
@@ -531,6 +537,7 @@
 					</div>
 
 					<p id="mic" class="mic"></p>
+					<button id="mic-btn" class="mic-btn" type="button" hidden>🎤 Tocca per attivare il microfono</button>
 					<p id="heard" class="heard" aria-live="polite"></p>
 
 					<form id="answer-form" class="answer">
@@ -892,8 +899,13 @@
 			active: false,
 			deadline: 0,
 			frame: 0,
+			inLevel: false,
 			recognition: null,
+			listening: false,
+			denied: false,
 			restarts: 0,
+			resultCount: 0,
+			baseline: 0,
 		};
 
 		// ---------- Utilità ----------
@@ -959,21 +971,38 @@
 			$("heard").classList.toggle("miss", miss);
 		}
 
-		function startListening(country) {
-			if (!state.voice) return;
+		// Il microfono resta aperto per tutto il livello con un'unica sessione di ascolto,
+		// avviata da un tocco dell'utente ("Inizia", "Livello successivo", "Riattiva").
+		// Safari su iPhone concede il microfono solo a sessioni avviate da un tocco:
+		// aprirne una nuova a ogni domanda fa ricomparire la richiesta di permesso
+		// e la sessione non parte.
+		function startListening() {
+			if (!state.voice || state.recognition) return;
 			const recognition = new SpeechRecognition();
 			recognition.lang = "it-IT";
 			recognition.continuous = true;
 			recognition.interimResults = true;
 			recognition.maxAlternatives = 5;
 
+			recognition.onstart = () => {
+				if (state.recognition !== recognition) return;
+				state.listening = true;
+				updateMicStatus();
+			};
+
 			recognition.onresult = (event) => {
 				if (state.recognition !== recognition) return;
-				for (let i = event.resultIndex; i < event.results.length; i++) {
+				state.resultCount = event.results.length;
+				if (!state.active) return;
+				const country = state.questions[state.index];
+				// I risultati precedenti all'inizio della domanda (es. la lettura del
+				// nome dello Stato) appartengono alla domanda prima: ignorali.
+				for (let i = Math.max(event.resultIndex, state.baseline); i < event.results.length; i++) {
 					const result = event.results[i];
 					const alternatives = Array.from(result, (alt) => alt.transcript);
-					if (alternatives.some((t) => isCorrect(t, country))) {
-						showHeard(alternatives.find((t) => isCorrect(t, country)));
+					const match = alternatives.find((t) => isCorrect(t, country));
+					if (match) {
+						showHeard(match);
 						return finishQuestion(true);
 					}
 					showHeard(alternatives[0], result.isFinal);
@@ -981,38 +1010,40 @@
 			};
 
 			recognition.onerror = (event) => {
+				if (state.recognition !== recognition) return;
 				if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-					switchToKeyboard("Microfono non autorizzato: rispondi scrivendo.");
+					state.denied = true;
 				}
 			};
 
-			// Chrome chiude la sessione dopo qualche secondo di silenzio: riaprila
-			// finché la domanda è attiva.
+			// La sessione può chiudersi da sola (silenzio prolungato, rete, iPhone
+			// in standby): si prova a riaprirla, e se non riparte compare il pulsante
+			// per riattivarla con un tocco.
 			recognition.onend = () => {
-				if (state.active && state.recognition === recognition && state.restarts++ < 8) {
-					try {
-						recognition.start();
-					} catch {
-						/* già avviata */
-					}
-				}
+				if (state.recognition !== recognition) return;
+				state.recognition = null;
+				state.listening = false;
+				if (state.inLevel && !state.denied && state.restarts++ < 3) startListening();
+				else updateMicStatus();
 			};
 
 			state.recognition = recognition;
-			state.restarts = 0;
+			state.resultCount = 0;
+			state.baseline = 0;
+			state.denied = false;
 			try {
 				recognition.start();
-				setMic("Ti ascolto… pronuncia la capitale", true);
 			} catch {
-				switchToKeyboard("Impossibile avviare il microfono: rispondi scrivendo.");
+				state.recognition = null;
 			}
+			updateMicStatus();
 		}
 
 		function stopListening() {
 			const recognition = state.recognition;
 			state.recognition = null;
+			state.listening = false;
 			if (!recognition) return;
-			recognition.onend = null;
 			try {
 				recognition.abort();
 			} catch {
@@ -1020,11 +1051,15 @@
 			}
 		}
 
-		function switchToKeyboard(message) {
-			state.voice = false;
-			stopListening();
-			setMic(message);
-			$("answer").focus();
+		function updateMicStatus() {
+			const needsTap = state.voice && state.inLevel && !state.recognition;
+			$("mic-btn").hidden = !needsTap;
+			if (!state.inLevel || !state.active) return;
+			if (!state.voice) setMic("Scrivi la capitale e premi Invio");
+			else if (state.listening) setMic("Ti ascolto… pronuncia la capitale", true);
+			else if (state.recognition) setMic("Attivo il microfono…");
+			else if (state.denied) setMic("Microfono non autorizzato: tocca il pulsante qui sotto o rispondi scrivendo.");
+			else setMic("Microfono in pausa: tocca il pulsante qui sotto.");
 		}
 
 		// ---------- Timer ----------
@@ -1098,6 +1133,9 @@
 			state.index = 0;
 			state.results = [];
 			state.seen.push(...countries.map((c) => c.id));
+			state.inLevel = true;
+			state.restarts = 0;
+			startListening();
 			for (const c of countries) new Image().src = flagUrl(c.flag, 320);
 			$("hud-level").textContent = state.level;
 			show("screen-game");
@@ -1127,21 +1165,23 @@
 			setMic(state.speak ? "Ascolta…" : "");
 
 			await speak(country.name);
+			// Lascia al riconoscimento il tempo di elaborare la lettura appena fatta,
+			// così il nome dello Stato non viene preso come risposta.
+			if (state.speak && state.voice) await wait(400);
 
+			state.baseline = state.resultCount;
+			state.restarts = 0;
 			state.active = true;
 			startTimer();
-			if (state.voice) startListening(country);
-			else {
-				setMic("Scrivi la capitale e premi Invio");
-				$("answer").focus();
-			}
+			if (!state.recognition) startListening();
+			updateMicStatus();
+			if (!state.voice) $("answer").focus();
 		}
 
 		async function finishQuestion(correct) {
 			if (!state.active) return;
 			state.active = false;
 			cancelAnimationFrame(state.frame);
-			stopListening();
 
 			const country = state.questions[state.index];
 			const secondsLeft = Math.max(0, Math.ceil((state.deadline - performance.now()) / 1000));
@@ -1187,6 +1227,9 @@
 		}
 
 		function endLevel() {
+			state.inLevel = false;
+			stopListening();
+			updateMicStatus();
 			const correct = state.results.filter((r) => r.correct).length;
 			if (correct < PASS_THRESHOLD) return gameOver(false);
 
@@ -1203,6 +1246,9 @@
 		}
 
 		function gameOver(completed) {
+			state.inLevel = false;
+			stopListening();
+			updateMicStatus();
 			$("over-title").textContent = completed ? "Hai indovinato tutte le capitali del mondo!" : "Partita finita";
 			const reached = completed ? state.level - 1 : state.level;
 			$("over-summary").textContent = completed
@@ -1320,6 +1366,11 @@
 			});
 
 			$("skip").addEventListener("click", () => finishQuestion(false));
+
+			$("mic-btn").addEventListener("click", () => {
+				state.restarts = 0;
+				startListening();
+			});
 
 			$("next-level").addEventListener("click", () => {
 				state.level++;

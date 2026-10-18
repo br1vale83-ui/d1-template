@@ -16,3 +16,5 @@ deve **pronunciare la capitale entro 10 secondi**.
   HTTPS o `localhost` (Chrome lo consente anche da `file://`). La risposta è accettata anche con accenti,
   grafie straniere e piccoli errori di trascrizione. Senza microfono si può rispondere scrivendo.
 - Bandiere da [flagcdn.com](https://flagcdn.com); senza connessione viene mostrata l'emoji della bandiera.
+- Su iPhone: aprire la pagina in Safari via HTTPS e impostare il microfono del sito su "Consenti"
+  (aA → Impostazioni sito web → Microfono) per non ricevere la richiesta a ogni livello.

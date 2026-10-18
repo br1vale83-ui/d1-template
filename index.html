@@ -520,14 +520,14 @@
 						<input id="player" maxlength="20" required autocomplete="nickname" placeholder="Es. Giulia" />
 					</label>
 					<label class="check"><input type="checkbox" id="opt-voice" checked /> Rispondi a voce (microfono)</label>
-					<label class="check"><input type="checkbox" id="opt-speak" checked /> Leggi ad alta voce il nome dello Stato</label>
+					<label class="check" id="opt-speak-row"><input type="checkbox" id="opt-speak" checked autocomplete="off" /> Leggi ad alta voce il nome dello Stato</label>
 					<p id="voice-warning" class="warning" hidden>
 						Questo browser non supporta il riconoscimento vocale: potrai rispondere scrivendo. Per giocare a voce usa
 						Chrome, Edge o Safari.
 					</p>
 					<p id="ios-tip" class="tip" hidden>
-						Su iPhone la lettura ad alta voce disturba il microfono, per questo è disattivata. Se la attivi e il
-						microfono smette di sentirti, disattivala di nuovo.
+						Su iPhone la lettura ad alta voce del nome dello Stato non è disponibile: dopo la voce il microfono
+						smette di sentire.
 					</p>
 					<button class="primary" type="submit">Inizia</button>
 				</form>
@@ -906,8 +906,8 @@
 
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-		// Su iPhone e iPad la voce sintetizzata interferisce con il microfono (dopo una
-		// lettura l'ascolto spesso non sente più nulla): lì la lettura parte disattivata.
+		// Su iPhone e iPad dopo che la voce sintetizzata ha parlato il microfono smette di
+		// sentire (registri ?debug): lì la lettura ad alta voce non è disponibile.
 		const IS_IOS =
 			/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
@@ -1517,6 +1517,7 @@
 				$("voice-warning").hidden = false;
 			} else if (IS_IOS) {
 				$("opt-speak").checked = false;
+				$("opt-speak-row").hidden = true;
 				$("ios-tip").hidden = false;
 			}
 			$("debug").hidden = !DEBUG;
@@ -1537,7 +1538,8 @@
 				if (!state.player) return;
 				storage("player", state.player);
 				state.voice = voiceBox.checked && !!SpeechRecognition;
-				state.speak = $("opt-speak").checked;
+				// Su iPhone mai: Safari può ripristinare la casella com'era prima del ricaricamento.
+				state.speak = $("opt-speak").checked && !IS_IOS;
 				startGame();
 			});
 

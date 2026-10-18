@@ -922,6 +922,8 @@
 			baseline: 0,
 			transcript: "",
 			baselineText: "",
+			sessionDirty: false,
+			restartPending: false,
 		};
 
 		// ---------- Utilità ----------
@@ -1033,6 +1035,7 @@
 				// si allunga: per questo si confronta il testo e non la posizione.
 				const transcript = results.map((r) => r[0].transcript).join(" ");
 				state.transcript = transcript;
+				state.sessionDirty = true;
 				state.resultCount = results.length;
 				debugLog(
 					`result idx=${event.resultIndex} n=${results.length} final=${last.isFinal}${state.active ? "" : " (ignorato)"}: «${transcript}»`,
@@ -1051,6 +1054,9 @@
 					return finishQuestion(true);
 				}
 				if (fresh.trim()) showHeard(fresh, last.isFinal);
+				// Su iPhone, dopo una frase conclusa la sessione resta aperta ma non
+				// trascrive più nulla: riavviala per permettere un nuovo tentativo.
+				if (last.isFinal) restartListening();
 			};
 
 			recognition.onerror = (event) => {
@@ -1067,18 +1073,29 @@
 			recognition.onend = () => {
 				debugLog("end");
 				if (state.recognition !== recognition) return;
-				state.recognition = null;
 				state.listening = false;
-				if (state.inLevel && !state.denied && state.restarts++ < 3) startListening();
-				else updateMicStatus();
+				if (state.restartPending || (state.inLevel && !state.denied && state.restarts++ < 3)) {
+					state.restartPending = false;
+					beginSession(recognition);
+				} else {
+					state.recognition = null;
+					updateMicStatus();
+				}
 			};
 
 			state.recognition = recognition;
+			state.denied = false;
+			beginSession(recognition);
+		}
+
+		// Avvia (o riavvia) una sessione di ascolto. Si riusa sempre lo stesso oggetto,
+		// così Safari non chiede di nuovo il permesso del microfono.
+		function beginSession(recognition) {
 			state.resultCount = 0;
 			state.transcript = "";
 			state.baselineText = "";
 			state.baseline = 0;
-			state.denied = false;
+			state.sessionDirty = false;
 			try {
 				recognition.start();
 				debugLog("start() chiamato");
@@ -1087,6 +1104,29 @@
 				state.recognition = null;
 			}
 			updateMicStatus();
+		}
+
+		// Chiude la sessione corrente e ne apre subito una nuova (in "onend").
+		function restartListening() {
+			const recognition = state.recognition;
+			if (!recognition) return startListening();
+			if (state.restartPending) return;
+			debugLog("riavvio sessione");
+			state.restartPending = true;
+			state.listening = false;
+			updateMicStatus();
+			try {
+				recognition.abort();
+			} catch {
+				/* già ferma */
+			}
+			// Se "end" non arriva, riprova comunque.
+			setTimeout(() => {
+				if (state.restartPending && state.recognition === recognition) {
+					state.restartPending = false;
+					beginSession(recognition);
+				}
+			}, 1500);
 		}
 
 		const tailWords = (text, count = 6) => text.trim().split(/\s+/).slice(-count).join(" ");
@@ -1104,6 +1144,7 @@
 			const recognition = state.recognition;
 			state.recognition = null;
 			state.listening = false;
+			state.restartPending = false;
 			if (!recognition) return;
 			try {
 				recognition.abort();
@@ -1235,7 +1276,9 @@
 			state.restarts = 0;
 			state.active = true;
 			startTimer();
+			// Ogni domanda parte con una sessione nuova, se quella attuale ha già sentito qualcosa.
 			if (!state.recognition) startListening();
+			else if (state.sessionDirty) restartListening();
 			updateMicStatus();
 			if (!state.voice) $("answer").focus();
 		}

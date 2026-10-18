@@ -1,6 +1,6 @@
 # Quiz delle Capitali
 
-Webapp in un unico file, `quiz-capitali.html` (HTML + CSS + JS, nessuna dipendenza né server):
+Webapp in un unico file, `index.html` (HTML + CSS + JS, nessuna dipendenza né server):
 basta aprirla nel browser.
 
 Viene mostrato (e letto ad alta voce) uno Stato scelto a caso, con la sua bandiera, e il giocatore

@@ -1026,12 +1026,13 @@
 			$("heard").classList.toggle("miss", miss);
 		}
 
-		// Si usa un solo oggetto di riconoscimento per livello, creato con un tocco
-		// ("Inizia", "Livello successivo", pulsante del microfono): riusandolo, Safari su
-		// iPhone non chiede di nuovo il permesso. Su iPhone però una sessione di ascolto
-		// smette di trascrivere dopo una frase conclusa, oppure se la voce sintetizzata
-		// parla mentre è in corso: per questo la sessione viene rinnovata a ogni domanda
-		// e dopo ogni frase, e messa in pausa mentre il nome dello Stato viene letto.
+		// Su iPhone una sessione di ascolto smette di trascrivere dopo una frase conclusa:
+		// per questo viene rinnovata a ogni domanda e dopo ogni frase. Una sessione
+		// riavviata subito sullo stesso oggetto resta però agganciata alla sorgente audio
+		// appena chiusa e non sente nulla (errore "audio-capture: Source is stopped"):
+		// ogni rinnovo usa quindi un oggetto nuovo, avviato poco dopo la chiusura del
+		// precedente. Il primo oggetto viene creato con un tocco ("Inizia", "Livello
+		// successivo", pulsante del microfono), che su iPhone concede il microfono.
 
 		function startListening() {
 			if (!state.voice) return;
@@ -1154,11 +1155,16 @@
 			}
 		}
 
+		const RESTART_DELAY = 600;
+
 		function scheduleStart() {
 			clearTimeout(state.startTimer);
 			state.startTimer = setTimeout(() => {
-				if (state.wantListening && !state.sessionRunning && state.recognition) beginSession();
-			}, 250);
+				if (!state.wantListening || state.sessionRunning || !state.recognition) return;
+				state.recognition = createRecognition();
+				debugLog("nuovo oggetto microfono");
+				beginSession();
+			}, RESTART_DELAY);
 		}
 
 		function abortSession() {

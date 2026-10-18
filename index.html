@@ -924,6 +924,7 @@
 			baselineText: "",
 			sessionDirty: false,
 			restartPending: false,
+			speaking: false,
 		};
 
 		// ---------- Utilità ----------
@@ -1040,15 +1041,21 @@
 				debugLog(
 					`result idx=${event.resultIndex} n=${results.length} final=${last.isFinal}${state.active ? "" : " (ignorato)"}: «${transcript}»`,
 				);
-				if (!state.active) return;
+				if (!state.active) {
+					if (last.isFinal && state.inLevel) restartListening();
+					return;
+				}
 
 				const country = state.questions[state.index];
+				// Se lo Stato ha lo stesso nome della capitale (Gibuti, Panama...), mentre
+				// viene letto ad alta voce il microfono potrebbe sentirlo: non vale come risposta.
+				const selfAnswer = state.speaking && isCorrect(country.name, country);
 				const fresh = freshSpeech(transcript);
 				const candidates = [fresh];
 				if (results.length - 1 >= state.baseline) {
 					candidates.push(...Array.from(last, (alt) => tailWords(alt.transcript)));
 				}
-				const match = candidates.find((t) => isCorrect(t, country));
+				const match = !selfAnswer && candidates.find((t) => isCorrect(t, country));
 				if (match) {
 					showHeard(match);
 					return finishQuestion(true);
@@ -1264,29 +1271,31 @@
 			$("q-meta").textContent = `${country.continent} · ${TIER_LABELS[country.tier]}`;
 			$("answer").value = "";
 			showHeard("");
-			setMic(state.speak ? "Ascolta…" : "");
 
-			await speak(country.name);
-			// Lascia al riconoscimento il tempo di elaborare la lettura appena fatta,
-			// così il nome dello Stato non viene preso come risposta.
-			if (state.speak && state.voice) await wait(400);
-
+			// La domanda è aperta da subito: si può rispondere mentre il nome viene letto.
 			state.baseline = state.resultCount;
 			state.baselineText = state.transcript;
 			state.restarts = 0;
 			state.active = true;
 			startTimer();
-			// Ogni domanda parte con una sessione nuova, se quella attuale ha già sentito qualcosa.
 			if (!state.recognition) startListening();
-			else if (state.sessionDirty) restartListening();
 			updateMicStatus();
 			if (!state.voice) $("answer").focus();
+
+			state.speaking = state.speak;
+			const question = state.index;
+			await speak(country.name);
+			if (state.index === question) state.speaking = false;
 		}
 
 		async function finishQuestion(correct) {
 			if (!state.active) return;
 			state.active = false;
+			state.speaking = false;
 			cancelAnimationFrame(state.frame);
+			// Prepara una sessione nuova durante il messaggio di esito, così è già
+			// pronta quando compare lo Stato successivo.
+			if (state.sessionDirty) restartListening();
 
 			const country = state.questions[state.index];
 			const secondsLeft = Math.max(0, Math.ceil((state.deadline - performance.now()) / 1000));

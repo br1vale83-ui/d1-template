@@ -128,12 +128,6 @@
 				align-items: center;
 			}
 
-			.tip {
-				margin: 0;
-				color: var(--muted);
-				font-size: 0.92rem;
-			}
-
 			.warning {
 				margin: 0;
 				color: var(--warn);
@@ -348,13 +342,22 @@
 			}
 
 			.mic-btn {
-				background: var(--accent);
 				border-color: var(--accent);
-				color: var(--accent-text);
-				font-weight: 700;
-				font-size: 1.1rem;
-				padding: 14px 28px;
-				border-radius: 999px;
+				color: var(--accent);
+				font-weight: 600;
+			}
+
+			.debug {
+				margin: 20px 0 0;
+				padding: 12px;
+				border-radius: 10px;
+				background: var(--surface);
+				border: 1px solid var(--border);
+				font-size: 0.75rem;
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+				max-height: 40vh;
+				overflow-y: auto;
 			}
 
 			.heard {
@@ -516,14 +519,6 @@
 						Questo browser non supporta il riconoscimento vocale: potrai rispondere scrivendo. Per giocare a voce usa
 						Chrome, Edge o Safari.
 					</p>
-					<p id="standalone-warning" class="warning" hidden>
-						Nell'app aggiunta alla schermata Home l'iPhone non attiva il riconoscimento vocale: potrai rispondere
-						scrivendo. Per giocare a voce apri il quiz in Safari.
-					</p>
-					<p id="ios-tip" class="tip" hidden>
-						Su iPhone tocca il microfono a ogni domanda e poi pronuncia la capitale. Per non ricevere ogni volta la
-						richiesta di accesso: in Safari tocca <strong>aA</strong> → Impostazioni sito web → Microfono → Consenti.
-					</p>
 					<button class="primary" type="submit">Inizia</button>
 				</form>
 				<div class="panel board">
@@ -587,6 +582,7 @@
 				</div>
 				<button id="restart" class="primary" type="button">Gioca ancora</button>
 			</section>
+			<pre id="debug" class="debug" hidden></pre>
 		</main>
 		<script>
 		// [Stato, capitale, risposte alternative separate da "|", difficoltà 1-5, continente, codice ISO della bandiera]
@@ -900,14 +896,6 @@
 
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-		// Su iPhone e iPad Safari chiude l'ascolto dopo ogni frase e lo riapre solo se
-		// parte da un tocco: lì si tocca il microfono a ogni domanda ("tocca e parla").
-		// Nella webapp aggiunta alla schermata Home il riconoscimento vocale non è attivo.
-		const IS_IOS =
-			/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-		const TAP_TO_TALK = IS_IOS;
-		const IOS_STANDALONE = IS_IOS && navigator.standalone === true;
-
 		const $ = (id) => document.getElementById(id);
 
 		const state = {
@@ -932,7 +920,8 @@
 			restarts: 0,
 			resultCount: 0,
 			baseline: 0,
-			heardSomething: false,
+			transcript: "",
+			baselineText: "",
 		};
 
 		// ---------- Utilità ----------
@@ -986,6 +975,19 @@
 			});
 		}
 
+		// ---------- Diagnostica ----------
+
+		// Aprendo la pagina con "?debug" in fondo all'indirizzo compare un registro
+		// degli eventi del microfono, utile per capire cosa succede su un telefono.
+		const DEBUG = new URLSearchParams(location.search).has("debug");
+
+		function debugLog(message) {
+			if (!DEBUG) return;
+			const box = $("debug");
+			const time = new Date().toLocaleTimeString("it-IT");
+			box.textContent = `${time} ${message}\n${box.textContent}`.split("\n").slice(0, 60).join("\n");
+		}
+
 		// ---------- Riconoscimento vocale ----------
 
 		function setMic(text, listening = false) {
@@ -1007,11 +1009,16 @@
 			if (!state.voice || state.recognition) return;
 			const recognition = new SpeechRecognition();
 			recognition.lang = "it-IT";
-			recognition.continuous = !TAP_TO_TALK;
+			recognition.continuous = true;
 			recognition.interimResults = true;
 			recognition.maxAlternatives = 5;
 
+			for (const name of ["audiostart", "speechstart", "speechend", "audioend", "nomatch"]) {
+				recognition[`on${name}`] = () => debugLog(name);
+			}
+
 			recognition.onstart = () => {
+				debugLog("start");
 				if (state.recognition !== recognition) return;
 				state.listening = true;
 				updateMicStatus();
@@ -1019,25 +1026,35 @@
 
 			recognition.onresult = (event) => {
 				if (state.recognition !== recognition) return;
-				state.resultCount = event.results.length;
+				const results = Array.from(event.results);
+				const last = results[results.length - 1];
+				// Testo completo della sessione. Chrome crea un risultato per ogni frase,
+				// Safari su iPhone può invece accumulare tutto in un unico risultato che
+				// si allunga: per questo si confronta il testo e non la posizione.
+				const transcript = results.map((r) => r[0].transcript).join(" ");
+				state.transcript = transcript;
+				state.resultCount = results.length;
+				debugLog(
+					`result idx=${event.resultIndex} n=${results.length} final=${last.isFinal}${state.active ? "" : " (ignorato)"}: «${transcript}»`,
+				);
 				if (!state.active) return;
+
 				const country = state.questions[state.index];
-				// I risultati precedenti all'inizio della domanda (es. la lettura del
-				// nome dello Stato) appartengono alla domanda prima: ignorali.
-				for (let i = Math.max(event.resultIndex, state.baseline); i < event.results.length; i++) {
-					const result = event.results[i];
-					const alternatives = Array.from(result, (alt) => alt.transcript);
-					const match = alternatives.find((t) => isCorrect(t, country));
-					if (match) {
-						showHeard(match);
-						return finishQuestion(true);
-					}
-					showHeard(alternatives[0], result.isFinal);
-					state.heardSomething = true;
+				const fresh = freshSpeech(transcript);
+				const candidates = [fresh];
+				if (results.length - 1 >= state.baseline) {
+					candidates.push(...Array.from(last, (alt) => tailWords(alt.transcript)));
 				}
+				const match = candidates.find((t) => isCorrect(t, country));
+				if (match) {
+					showHeard(match);
+					return finishQuestion(true);
+				}
+				if (fresh.trim()) showHeard(fresh, last.isFinal);
 			};
 
 			recognition.onerror = (event) => {
+				debugLog(`error: ${event.error}${event.message ? ` (${event.message})` : ""}`);
 				if (state.recognition !== recognition) return;
 				if (event.error === "not-allowed" || event.error === "service-not-allowed") {
 					state.denied = true;
@@ -1048,23 +1065,39 @@
 			// in standby): si prova a riaprirla, e se non riparte compare il pulsante
 			// per riattivarla con un tocco.
 			recognition.onend = () => {
+				debugLog("end");
 				if (state.recognition !== recognition) return;
 				state.recognition = null;
 				state.listening = false;
-				if (!TAP_TO_TALK && state.inLevel && !state.denied && state.restarts++ < 3) startListening();
+				if (state.inLevel && !state.denied && state.restarts++ < 3) startListening();
 				else updateMicStatus();
 			};
 
 			state.recognition = recognition;
 			state.resultCount = 0;
+			state.transcript = "";
+			state.baselineText = "";
 			state.baseline = 0;
 			state.denied = false;
 			try {
 				recognition.start();
-			} catch {
+				debugLog("start() chiamato");
+			} catch (error) {
+				debugLog(`start() fallito: ${error.message}`);
 				state.recognition = null;
 			}
 			updateMicStatus();
+		}
+
+		const tailWords = (text, count = 6) => text.trim().split(/\s+/).slice(-count).join(" ");
+
+		// Parole dette dopo l'inizio della domanda corrente. Se il riconoscimento ha
+		// riscritto il testo precedente, si usano solo le ultime parole.
+		function freshSpeech(transcript) {
+			const base = state.baselineText;
+			if (!base) return transcript;
+			if (transcript.startsWith(base)) return transcript.slice(base.length);
+			return tailWords(transcript);
 		}
 
 		function stopListening() {
@@ -1080,15 +1113,13 @@
 		}
 
 		function updateMicStatus() {
-			const needsTap = state.voice && state.inLevel && !state.recognition && (!TAP_TO_TALK || state.active);
+			const needsTap = state.voice && state.inLevel && !state.recognition;
 			$("mic-btn").hidden = !needsTap;
-			$("mic-btn").textContent = TAP_TO_TALK ? "🎤 Tocca e parla" : "🎤 Tocca per attivare il microfono";
 			if (!state.inLevel || !state.active) return;
 			if (!state.voice) setMic("Scrivi la capitale e premi Invio");
 			else if (state.listening) setMic("Ti ascolto… pronuncia la capitale", true);
 			else if (state.recognition) setMic("Attivo il microfono…");
 			else if (state.denied) setMic("Microfono non autorizzato: tocca il pulsante qui sotto o rispondi scrivendo.");
-			else if (TAP_TO_TALK) setMic(state.heardSomething ? "Non era giusta: tocca e riprova." : "Tocca il microfono e pronuncia la capitale.");
 			else setMic("Microfono in pausa: tocca il pulsante qui sotto.");
 		}
 
@@ -1165,7 +1196,7 @@
 			state.seen.push(...countries.map((c) => c.id));
 			state.inLevel = true;
 			state.restarts = 0;
-			if (!TAP_TO_TALK) startListening();
+			startListening();
 			for (const c of countries) new Image().src = flagUrl(c.flag, 320);
 			$("hud-level").textContent = state.level;
 			show("screen-game");
@@ -1200,11 +1231,11 @@
 			if (state.speak && state.voice) await wait(400);
 
 			state.baseline = state.resultCount;
+			state.baselineText = state.transcript;
 			state.restarts = 0;
-			state.heardSomething = false;
 			state.active = true;
 			startTimer();
-			if (!state.recognition && !TAP_TO_TALK) startListening();
+			if (!state.recognition) startListening();
 			updateMicStatus();
 			if (!state.voice) $("answer").focus();
 		}
@@ -1213,8 +1244,6 @@
 			if (!state.active) return;
 			state.active = false;
 			cancelAnimationFrame(state.frame);
-			if (TAP_TO_TALK) stopListening();
-			updateMicStatus();
 
 			const country = state.questions[state.index];
 			const secondsLeft = Math.max(0, Math.ceil((state.deadline - performance.now()) / 1000));
@@ -1360,12 +1389,10 @@
 				voiceBox.checked = false;
 				voiceBox.disabled = true;
 				$("voice-warning").hidden = false;
-			} else if (IOS_STANDALONE) {
-				voiceBox.checked = false;
-				$("standalone-warning").hidden = false;
-			} else if (TAP_TO_TALK) {
-				$("ios-tip").hidden = false;
 			}
+			$("debug").hidden = !DEBUG;
+			debugLog(`avvio: ${navigator.userAgent}`);
+			debugLog(`riconoscimento vocale: ${SpeechRecognition ? "disponibile" : "assente"}`);
 			if (!("speechSynthesis" in window)) {
 				$("opt-speak").checked = false;
 				$("opt-speak").disabled = true;

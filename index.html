@@ -128,6 +128,12 @@
 				align-items: center;
 			}
 
+			.tip {
+				margin: 0;
+				color: var(--muted);
+				font-size: 0.92rem;
+			}
+
 			.warning {
 				margin: 0;
 				color: var(--warn);
@@ -519,6 +525,10 @@
 						Questo browser non supporta il riconoscimento vocale: potrai rispondere scrivendo. Per giocare a voce usa
 						Chrome, Edge o Safari.
 					</p>
+					<p id="ios-tip" class="tip" hidden>
+						Su iPhone la lettura ad alta voce disturba il microfono, per questo è disattivata. Se la attivi e il
+						microfono smette di sentirti, disattivala di nuovo.
+					</p>
 					<button class="primary" type="submit">Inizia</button>
 				</form>
 				<div class="panel board">
@@ -895,6 +905,11 @@
 		const TIER_LABELS = ["", "Facilissimo", "Facile", "Medio", "Difficile", "Difficilissimo"];
 
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+		// Su iPhone e iPad la voce sintetizzata interferisce con il microfono (dopo una
+		// lettura l'ascolto spesso non sente più nulla): lì la lettura parte disattivata.
+		const IS_IOS =
+			/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 		const $ = (id) => document.getElementById(id);
 
@@ -1494,6 +1509,9 @@
 				voiceBox.checked = false;
 				voiceBox.disabled = true;
 				$("voice-warning").hidden = false;
+			} else if (IS_IOS) {
+				$("opt-speak").checked = false;
+				$("ios-tip").hidden = false;
 			}
 			$("debug").hidden = !DEBUG;
 			debugLog(`avvio: ${navigator.userAgent}`);

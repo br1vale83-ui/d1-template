@@ -923,7 +923,12 @@
 			transcript: "",
 			baselineText: "",
 			sessionDirty: false,
-			restartPending: false,
+			sessionRunning: false,
+			session: 0,
+			wantListening: false,
+			renew: false,
+			gaveUp: false,
+			startTimer: 0,
 			speaking: false,
 		};
 
@@ -965,14 +970,17 @@
 				utterance.lang = "it-IT";
 				const voice = italianVoice();
 				if (voice) utterance.voice = voice;
-				const done = () => {
+				const done = (how) => {
 					clearTimeout(fallback);
+					debugLog(`voce: ${how}`);
 					resolve();
 				};
-				// Alcuni browser non emettono mai "end": non bloccare il gioco.
-				const fallback = setTimeout(done, 4000);
-				utterance.onend = done;
-				utterance.onerror = done;
+				// Alcuni browser (es. iPhone con il microfono attivo) non segnalano mai la
+				// fine della lettura: non attendere più del necessario.
+				const fallback = setTimeout(() => done("fine non segnalata"), Math.min(4000, 1200 + 70 * text.length));
+				debugLog(`voce: «${text}»`);
+				utterance.onend = () => done("fine");
+				utterance.onerror = (event) => done(`errore ${event.error}`);
 				speechSynthesis.cancel();
 				speechSynthesis.speak(utterance);
 			});
@@ -1003,13 +1011,25 @@
 			$("heard").classList.toggle("miss", miss);
 		}
 
-		// Il microfono resta aperto per tutto il livello con un'unica sessione di ascolto,
-		// avviata da un tocco dell'utente ("Inizia", "Livello successivo", "Riattiva").
-		// Safari su iPhone concede il microfono solo a sessioni avviate da un tocco:
-		// aprirne una nuova a ogni domanda fa ricomparire la richiesta di permesso
-		// e la sessione non parte.
+		// Si usa un solo oggetto di riconoscimento per livello, creato con un tocco
+		// ("Inizia", "Livello successivo", pulsante del microfono): riusandolo, Safari su
+		// iPhone non chiede di nuovo il permesso. Su iPhone però una sessione di ascolto
+		// smette di trascrivere dopo una frase conclusa, oppure se la voce sintetizzata
+		// parla mentre è in corso: per questo la sessione viene rinnovata a ogni domanda
+		// e dopo ogni frase, e messa in pausa mentre il nome dello Stato viene letto.
+
 		function startListening() {
-			if (!state.voice || state.recognition) return;
+			if (!state.voice) return;
+			if (!state.recognition) state.recognition = createRecognition();
+			state.wantListening = true;
+			state.gaveUp = false;
+			state.denied = false;
+			state.restarts = 0;
+			if (!state.sessionRunning) beginSession();
+			updateMicStatus();
+		}
+
+		function createRecognition() {
 			const recognition = new SpeechRecognition();
 			recognition.lang = "it-IT";
 			recognition.continuous = true;
@@ -1042,7 +1062,7 @@
 					`result idx=${event.resultIndex} n=${results.length} final=${last.isFinal}${state.active ? "" : " (ignorato)"}: «${transcript}»`,
 				);
 				if (!state.active) {
-					if (last.isFinal && state.inLevel) restartListening();
+					if (last.isFinal && state.wantListening) renewListening();
 					return;
 				}
 
@@ -1061,9 +1081,8 @@
 					return finishQuestion(true);
 				}
 				if (fresh.trim()) showHeard(fresh, last.isFinal);
-				// Su iPhone, dopo una frase conclusa la sessione resta aperta ma non
-				// trascrive più nulla: riavviala per permettere un nuovo tentativo.
-				if (last.isFinal) restartListening();
+				// Dopo una frase conclusa serve una sessione nuova per un altro tentativo.
+				if (last.isFinal) renewListening();
 			};
 
 			recognition.onerror = (event) => {
@@ -1074,66 +1093,108 @@
 				}
 			};
 
-			// La sessione può chiudersi da sola (silenzio prolungato, rete, iPhone
-			// in standby): si prova a riaprirla, e se non riparte compare il pulsante
-			// per riattivarla con un tocco.
 			recognition.onend = () => {
 				debugLog("end");
 				if (state.recognition !== recognition) return;
-				state.listening = false;
-				if (state.restartPending || (state.inLevel && !state.denied && state.restarts++ < 3)) {
-					state.restartPending = false;
-					beginSession(recognition);
-				} else {
-					state.recognition = null;
-					updateMicStatus();
-				}
+				sessionEnded();
 			};
 
-			state.recognition = recognition;
-			state.denied = false;
-			beginSession(recognition);
+			return recognition;
 		}
 
-		// Avvia (o riavvia) una sessione di ascolto. Si riusa sempre lo stesso oggetto,
-		// così Safari non chiede di nuovo il permesso del microfono.
-		function beginSession(recognition) {
+		function beginSession() {
 			state.resultCount = 0;
 			state.transcript = "";
 			state.baselineText = "";
 			state.baseline = 0;
 			state.sessionDirty = false;
+			state.sessionRunning = true;
+			state.session++;
 			try {
-				recognition.start();
+				state.recognition.start();
 				debugLog("start() chiamato");
 			} catch (error) {
 				debugLog(`start() fallito: ${error.message}`);
-				state.recognition = null;
+				state.sessionRunning = false;
+				state.gaveUp = true;
 			}
 			updateMicStatus();
 		}
 
-		// Chiude la sessione corrente e ne apre subito una nuova (in "onend").
-		function restartListening() {
-			const recognition = state.recognition;
-			if (!recognition) return startListening();
-			if (state.restartPending) return;
-			debugLog("riavvio sessione");
-			state.restartPending = true;
+		// La sessione si è chiusa (da sola o perché l'abbiamo interrotta).
+		function sessionEnded() {
+			state.sessionRunning = false;
 			state.listening = false;
-			updateMicStatus();
+			if (!state.wantListening) return updateMicStatus();
+			if (state.renew) {
+				state.renew = false;
+				scheduleStart();
+			} else if (!state.denied && state.restarts++ < 3) {
+				// Chiusa da sola (silenzio prolungato, rete, standby): riaprila.
+				scheduleStart();
+			} else {
+				// Non riparte: compare il pulsante per riattivarla con un tocco.
+				state.gaveUp = true;
+				updateMicStatus();
+			}
+		}
+
+		function scheduleStart() {
+			clearTimeout(state.startTimer);
+			state.startTimer = setTimeout(() => {
+				if (state.wantListening && !state.sessionRunning && state.recognition) beginSession();
+			}, 250);
+		}
+
+		function abortSession() {
+			const session = state.session;
 			try {
-				recognition.abort();
+				state.recognition.abort();
 			} catch {
 				/* già ferma */
 			}
-			// Se "end" non arriva, riprova comunque.
+			// Se "end" non arriva, considera comunque chiusa la sessione.
 			setTimeout(() => {
-				if (state.restartPending && state.recognition === recognition) {
-					state.restartPending = false;
-					beginSession(recognition);
+				if (state.session === session && state.sessionRunning) {
+					debugLog("end non arrivato");
+					sessionEnded();
 				}
 			}, 1500);
+		}
+
+		// Chiude la sessione corrente (se c'è) e ne apre una nuova.
+		function renewListening() {
+			if (!state.voice || !state.recognition) return;
+			state.wantListening = true;
+			state.gaveUp = false;
+			if (state.sessionRunning) {
+				if (state.renew) return;
+				debugLog("rinnovo sessione");
+				state.renew = true;
+				state.listening = false;
+				abortSession();
+			} else {
+				scheduleStart();
+			}
+			updateMicStatus();
+		}
+
+		function pauseListening() {
+			state.wantListening = false;
+			state.renew = false;
+			clearTimeout(state.startTimer);
+			if (state.sessionRunning) {
+				debugLog("pausa microfono");
+				state.listening = false;
+				abortSession();
+			}
+		}
+
+		function stopListening() {
+			pauseListening();
+			state.recognition = null;
+			state.sessionRunning = false;
+			state.listening = false;
 		}
 
 		const tailWords = (text, count = 6) => text.trim().split(/\s+/).slice(-count).join(" ");
@@ -1147,28 +1208,14 @@
 			return tailWords(transcript);
 		}
 
-		function stopListening() {
-			const recognition = state.recognition;
-			state.recognition = null;
-			state.listening = false;
-			state.restartPending = false;
-			if (!recognition) return;
-			try {
-				recognition.abort();
-			} catch {
-				/* già ferma */
-			}
-		}
-
 		function updateMicStatus() {
-			const needsTap = state.voice && state.inLevel && !state.recognition;
-			$("mic-btn").hidden = !needsTap;
+			$("mic-btn").hidden = !(state.voice && state.inLevel && state.gaveUp);
 			if (!state.inLevel || !state.active) return;
 			if (!state.voice) setMic("Scrivi la capitale e premi Invio");
 			else if (state.listening) setMic("Ti ascolto… pronuncia la capitale", true);
-			else if (state.recognition) setMic("Attivo il microfono…");
-			else if (state.denied) setMic("Microfono non autorizzato: tocca il pulsante qui sotto o rispondi scrivendo.");
-			else setMic("Microfono in pausa: tocca il pulsante qui sotto.");
+			else if (state.gaveUp && state.denied) setMic("Microfono non autorizzato: tocca il pulsante qui sotto o rispondi scrivendo.");
+			else if (state.gaveUp) setMic("Microfono in pausa: tocca il pulsante qui sotto.");
+			else setMic("Attivo il microfono…");
 		}
 
 		// ---------- Timer ----------
@@ -1272,30 +1319,36 @@
 			$("answer").value = "";
 			showHeard("");
 
-			// La domanda è aperta da subito: si può rispondere mentre il nome viene letto.
+			const question = state.index;
+			if (state.speak) {
+				// Su iPhone la voce sintetizzata rende "sorda" una sessione di ascolto già
+				// avviata: metti in pausa il microfono durante la lettura del nome.
+				if (state.voice && state.listening) pauseListening();
+				setMic("Ascolta…");
+				state.speaking = true;
+				await speak(country.name);
+				state.speaking = false;
+				if (state.index !== question || !state.inLevel) return;
+			}
+
 			state.baseline = state.resultCount;
 			state.baselineText = state.transcript;
 			state.restarts = 0;
 			state.active = true;
 			startTimer();
-			if (!state.recognition) startListening();
+			if (state.voice && (!state.wantListening || !state.sessionRunning || state.sessionDirty)) renewListening();
 			updateMicStatus();
 			if (!state.voice) $("answer").focus();
-
-			state.speaking = state.speak;
-			const question = state.index;
-			await speak(country.name);
-			if (state.index === question) state.speaking = false;
 		}
 
 		async function finishQuestion(correct) {
 			if (!state.active) return;
 			state.active = false;
-			state.speaking = false;
 			cancelAnimationFrame(state.frame);
-			// Prepara una sessione nuova durante il messaggio di esito, così è già
-			// pronta quando compare lo Stato successivo.
-			if (state.sessionDirty) restartListening();
+			// Con la lettura ad alta voce il microfono resta in pausa fino alla domanda
+			// successiva; senza, si prepara subito una sessione nuova.
+			if (state.speak) pauseListening();
+			else if (state.sessionDirty) renewListening();
 
 			const country = state.questions[state.index];
 			const secondsLeft = Math.max(0, Math.ceil((state.deadline - performance.now()) / 1000));

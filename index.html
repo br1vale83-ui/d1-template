@@ -128,6 +128,12 @@
 				align-items: center;
 			}
 
+			.tip {
+				margin: 0;
+				color: var(--muted);
+				font-size: 0.92rem;
+			}
+
 			.warning {
 				margin: 0;
 				color: var(--warn);
@@ -342,9 +348,13 @@
 			}
 
 			.mic-btn {
+				background: var(--accent);
 				border-color: var(--accent);
-				color: var(--accent);
-				font-weight: 600;
+				color: var(--accent-text);
+				font-weight: 700;
+				font-size: 1.1rem;
+				padding: 14px 28px;
+				border-radius: 999px;
 			}
 
 			.heard {
@@ -505,6 +515,14 @@
 					<p id="voice-warning" class="warning" hidden>
 						Questo browser non supporta il riconoscimento vocale: potrai rispondere scrivendo. Per giocare a voce usa
 						Chrome, Edge o Safari.
+					</p>
+					<p id="standalone-warning" class="warning" hidden>
+						Nell'app aggiunta alla schermata Home l'iPhone non attiva il riconoscimento vocale: potrai rispondere
+						scrivendo. Per giocare a voce apri il quiz in Safari.
+					</p>
+					<p id="ios-tip" class="tip" hidden>
+						Su iPhone tocca il microfono a ogni domanda e poi pronuncia la capitale. Per non ricevere ogni volta la
+						richiesta di accesso: in Safari tocca <strong>aA</strong> → Impostazioni sito web → Microfono → Consenti.
 					</p>
 					<button class="primary" type="submit">Inizia</button>
 				</form>
@@ -882,6 +900,14 @@
 
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+		// Su iPhone e iPad Safari chiude l'ascolto dopo ogni frase e lo riapre solo se
+		// parte da un tocco: lì si tocca il microfono a ogni domanda ("tocca e parla").
+		// Nella webapp aggiunta alla schermata Home il riconoscimento vocale non è attivo.
+		const IS_IOS =
+			/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+		const TAP_TO_TALK = IS_IOS;
+		const IOS_STANDALONE = IS_IOS && navigator.standalone === true;
+
 		const $ = (id) => document.getElementById(id);
 
 		const state = {
@@ -906,6 +932,7 @@
 			restarts: 0,
 			resultCount: 0,
 			baseline: 0,
+			heardSomething: false,
 		};
 
 		// ---------- Utilità ----------
@@ -980,7 +1007,7 @@
 			if (!state.voice || state.recognition) return;
 			const recognition = new SpeechRecognition();
 			recognition.lang = "it-IT";
-			recognition.continuous = true;
+			recognition.continuous = !TAP_TO_TALK;
 			recognition.interimResults = true;
 			recognition.maxAlternatives = 5;
 
@@ -1006,6 +1033,7 @@
 						return finishQuestion(true);
 					}
 					showHeard(alternatives[0], result.isFinal);
+					state.heardSomething = true;
 				}
 			};
 
@@ -1023,7 +1051,7 @@
 				if (state.recognition !== recognition) return;
 				state.recognition = null;
 				state.listening = false;
-				if (state.inLevel && !state.denied && state.restarts++ < 3) startListening();
+				if (!TAP_TO_TALK && state.inLevel && !state.denied && state.restarts++ < 3) startListening();
 				else updateMicStatus();
 			};
 
@@ -1052,13 +1080,15 @@
 		}
 
 		function updateMicStatus() {
-			const needsTap = state.voice && state.inLevel && !state.recognition;
+			const needsTap = state.voice && state.inLevel && !state.recognition && (!TAP_TO_TALK || state.active);
 			$("mic-btn").hidden = !needsTap;
+			$("mic-btn").textContent = TAP_TO_TALK ? "🎤 Tocca e parla" : "🎤 Tocca per attivare il microfono";
 			if (!state.inLevel || !state.active) return;
 			if (!state.voice) setMic("Scrivi la capitale e premi Invio");
 			else if (state.listening) setMic("Ti ascolto… pronuncia la capitale", true);
 			else if (state.recognition) setMic("Attivo il microfono…");
 			else if (state.denied) setMic("Microfono non autorizzato: tocca il pulsante qui sotto o rispondi scrivendo.");
+			else if (TAP_TO_TALK) setMic(state.heardSomething ? "Non era giusta: tocca e riprova." : "Tocca il microfono e pronuncia la capitale.");
 			else setMic("Microfono in pausa: tocca il pulsante qui sotto.");
 		}
 
@@ -1135,7 +1165,7 @@
 			state.seen.push(...countries.map((c) => c.id));
 			state.inLevel = true;
 			state.restarts = 0;
-			startListening();
+			if (!TAP_TO_TALK) startListening();
 			for (const c of countries) new Image().src = flagUrl(c.flag, 320);
 			$("hud-level").textContent = state.level;
 			show("screen-game");
@@ -1171,9 +1201,10 @@
 
 			state.baseline = state.resultCount;
 			state.restarts = 0;
+			state.heardSomething = false;
 			state.active = true;
 			startTimer();
-			if (!state.recognition) startListening();
+			if (!state.recognition && !TAP_TO_TALK) startListening();
 			updateMicStatus();
 			if (!state.voice) $("answer").focus();
 		}
@@ -1182,6 +1213,8 @@
 			if (!state.active) return;
 			state.active = false;
 			cancelAnimationFrame(state.frame);
+			if (TAP_TO_TALK) stopListening();
+			updateMicStatus();
 
 			const country = state.questions[state.index];
 			const secondsLeft = Math.max(0, Math.ceil((state.deadline - performance.now()) / 1000));
@@ -1327,6 +1360,11 @@
 				voiceBox.checked = false;
 				voiceBox.disabled = true;
 				$("voice-warning").hidden = false;
+			} else if (IOS_STANDALONE) {
+				voiceBox.checked = false;
+				$("standalone-warning").hidden = false;
+			} else if (TAP_TO_TALK) {
+				$("ios-tip").hidden = false;
 			}
 			if (!("speechSynthesis" in window)) {
 				$("opt-speak").checked = false;

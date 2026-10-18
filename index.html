@@ -128,12 +128,6 @@
 				align-items: center;
 			}
 
-			.tip {
-				margin: 0;
-				color: var(--muted);
-				font-size: 0.92rem;
-			}
-
 			.warning {
 				margin: 0;
 				color: var(--warn);
@@ -520,14 +514,10 @@
 						<input id="player" maxlength="20" required autocomplete="nickname" placeholder="Es. Giulia" />
 					</label>
 					<label class="check"><input type="checkbox" id="opt-voice" checked /> Rispondi a voce (microfono)</label>
-					<label class="check" id="opt-speak-row"><input type="checkbox" id="opt-speak" checked autocomplete="off" /> Leggi ad alta voce il nome dello Stato</label>
+					<label class="check"><input type="checkbox" id="opt-speak" checked /> Leggi ad alta voce il nome dello Stato</label>
 					<p id="voice-warning" class="warning" hidden>
 						Questo browser non supporta il riconoscimento vocale: potrai rispondere scrivendo. Per giocare a voce usa
 						Chrome, Edge o Safari.
-					</p>
-					<p id="ios-tip" class="tip" hidden>
-						Su iPhone la lettura ad alta voce del nome dello Stato non è disponibile: dopo la voce il microfono
-						smette di sentire.
 					</p>
 					<button class="primary" type="submit">Inizia</button>
 				</form>
@@ -906,8 +896,6 @@
 
 		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-		// Su iPhone e iPad dopo che la voce sintetizzata ha parlato il microfono smette di
-		// sentire (registri ?debug): lì la lettura ad alta voce non è disponibile.
 		const IS_IOS =
 			/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
@@ -944,6 +932,7 @@
 			gaveUp: false,
 			speaking: false,
 			spokeUntil: 0,
+			micStream: null,
 		};
 
 		// ---------- Utilità ----------
@@ -1035,8 +1024,42 @@
 		// Il primo avvio avviene con un tocco ("Inizia", "Livello successivo", pulsante
 		// del microfono), che su iPhone concede il microfono.
 
+		// Su iPhone, quando una sessione di ascolto finisce (da sola o interrotta), Safari
+		// spegne la sorgente audio del microfono e la sessione successiva vi resta
+		// agganciata senza sentire nulla, finché segnala "audio-capture: Source is stopped".
+		// Per evitarlo si tiene aperto il microfono anche con getUserMedia per tutta la
+		// partita, così la sorgente audio resta accesa tra una sessione e l'altra.
+		async function keepMicOpen() {
+			if (!IS_IOS || state.micStream || !navigator.mediaDevices?.getUserMedia) return;
+			state.micStream = "in apertura";
+			try {
+				const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+				state.micStream = stream;
+				const [track] = stream.getAudioTracks();
+				debugLog(`microfono tenuto aperto: ${track?.readyState}`);
+				if (track) {
+					track.onended = () => {
+						debugLog("microfono tenuto aperto: chiuso");
+						if (state.micStream === stream) state.micStream = null;
+					};
+					track.onmute = () => debugLog("microfono tenuto aperto: muto");
+					track.onunmute = () => debugLog("microfono tenuto aperto: di nuovo attivo");
+				}
+			} catch (error) {
+				debugLog(`getUserMedia fallito: ${error.name} ${error.message}`);
+				state.micStream = null;
+			}
+		}
+
+		function releaseMic() {
+			const stream = state.micStream;
+			state.micStream = null;
+			if (stream instanceof MediaStream) for (const track of stream.getTracks()) track.stop();
+		}
+
 		function startListening() {
 			if (!state.voice) return;
+			keepMicOpen();
 			if (!state.recognition) state.recognition = createRecognition();
 			state.wantListening = true;
 			state.gaveUp = false;
@@ -1373,6 +1396,7 @@
 		function gameOver(completed) {
 			state.inLevel = false;
 			stopListening();
+			releaseMic();
 			updateMicStatus();
 			$("over-title").textContent = completed ? "Hai indovinato tutte le capitali del mondo!" : "Partita finita";
 			const reached = completed ? state.level - 1 : state.level;
@@ -1452,10 +1476,6 @@
 				voiceBox.checked = false;
 				voiceBox.disabled = true;
 				$("voice-warning").hidden = false;
-			} else if (IS_IOS) {
-				$("opt-speak").checked = false;
-				$("opt-speak-row").hidden = true;
-				$("ios-tip").hidden = false;
 			}
 			$("debug").hidden = !DEBUG;
 			debugLog(`avvio: ${navigator.userAgent}`);
@@ -1475,8 +1495,7 @@
 				if (!state.player) return;
 				storage("player", state.player);
 				state.voice = voiceBox.checked && !!SpeechRecognition;
-				// Su iPhone mai: Safari può ripristinare la casella com'era prima del ricaricamento.
-				state.speak = $("opt-speak").checked && !IS_IOS;
+				state.speak = $("opt-speak").checked;
 				startGame();
 			});
 
